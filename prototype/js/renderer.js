@@ -444,8 +444,8 @@ class Renderer {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // MTF: 鼠标瞄准线
-    if (player.role === 'mtf' && this.game && this.game.mouseWorld) {
+    // 持枪角色: 鼠标瞄准线 (MTF/GOC/CI/持枪D级)
+    if (player.weapon && player.role !== 'scp173' && this.game && this.game.mouseWorld) {
       const mw = this.game.mouseWorld;
       const dx = mw.x - player.pos.x;
       const dy = mw.y - player.pos.y;
@@ -474,8 +474,8 @@ class Renderer {
       ctx.font = 'bold 10px Consolas';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#ffffff';
-      const roleName = player.role === 'dclass' ? 'D级' :
-                       player.role === 'mtf' ? 'MTF' : 'SCP-173';
+      const ROLE_NAMES = { dclass: 'D级', scientist: '科学家', mtf: 'MTF', goc: 'GOC', ci: 'CI', scp173: 'SCP-173' };
+      const roleName = ROLE_NAMES[player.role] || player.role;
       ctx.fillText(`你 (${roleName})`, player.pos.x, player.pos.y - player.radius - 8);
 
       // HP 条

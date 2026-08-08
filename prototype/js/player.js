@@ -50,6 +50,9 @@ class Player {
     this.keycardLevel = 0;    // 0=无卡, 1-5=等级, 0(Omni) 特殊
     this.interactRange = CONFIG.TILE_SIZE * 1.2; // 交互距离
 
+    // 角色追踪
+    this._lastZone = null;    // 科学家文档收集用
+
     // 输入引用 (由 game 注入)
     this.input = null;
     this.mouseWorld = new Vec2(0, 0);
@@ -64,6 +67,37 @@ class Player {
         this.weapon = null; // 无武器, 需拾取
         this.keycardLevel = 1; // 清洁工卡 (Lv.1)
         this.ammo = 0;
+        break;
+      case 'scientist':
+        this.weapon = null; // 科学家无武器, 靠智取
+        this.keycardLevel = 2; // 科学家卡 (Lv.2)
+        this.ammo = 0;
+        this.hp = 100;
+        this.maxHp = 100;
+        this.speed = 105;
+        this.docCount = 0; // 已收集文档
+        this.medkit = 1;   // 急救包
+        break;
+      case 'goc':
+        this.weapon = 'energy'; // GOC 能量武器 (对SCP 2x)
+        this.ammo = 20;
+        this.hp = 120;
+        this.maxHp = 120;
+        this.armor = 0.15;
+        this.speed = 120;
+        this.keycardLevel = 3;
+        this.scpKills = 0; // 已摧毁SCP
+        break;
+      case 'ci':
+        this.weapon = 'rifle';
+        this.ammo = 30;
+        this.hp = 130;
+        this.maxHp = 130;
+        this.armor = 0.20;
+        this.speed = 120;
+        this.keycardLevel = 3; // CI破解器 (约Lv.3)
+        this.foundationKills = 0; // 已击杀基金会人员
+        this.dclassEscorted = 0;  // 已接触护送D级
         break;
       case 'mtf':
         this.weapon = 'rifle';
@@ -98,8 +132,72 @@ class Player {
 
     switch (this.role) {
       case 'dclass':  this._updateDClass(dt, ctx);  break;
+      case 'scientist': this._updateScientist(dt, ctx); break;
+      case 'goc':     this._updateGOC(dt, ctx);     break;
+      case 'ci':      this._updateCI(dt, ctx);      break;
       case 'mtf':     this._updateMTF(dt, ctx);     break;
       case 'scp173':  this._updateSCP173(dt, ctx);  break;
+    }
+  }
+
+  // ============================================================
+  // 科学家: 收集文档 + 逃离 (无武器, 按E使用急救包)
+  // ============================================================
+  _updateScientist(dt, ctx) {
+    this._handleMovement(dt, ctx);
+
+    // 收集文档: 进入新区域 +1
+    const tile = ctx.map.worldToTile(this.pos.x, this.pos.y);
+    const zone = ctx.map.getZone(tile.col, tile.row);
+    if (zone && zone !== this._lastZone) {
+      this._lastZone = zone;
+      if (zone === 'HCZ' || zone === 'EZ' || zone === 'SZ') {
+        this.docCount = Math.min(3, this.docCount + 1);
+        ctx.game.logEvent(`发现 SCP 文档 (${this.docCount}/3)`, 'info');
+      }
+    }
+
+    // 使用急救包 (H键)
+    if (this.input.keys['KeyH'] && this.medkit > 0 && this.hp < this.maxHp) {
+      this.medkit--;
+      this.hp = Math.min(this.maxHp, this.hp + 50);
+      ctx.game.logEvent(`使用急救包 (+50HP) 剩余 ${this.medkit}`, 'info');
+    }
+  }
+
+  // ============================================================
+  // GOC: 能量武器猎杀SCP
+  // ============================================================
+  _updateGOC(dt, ctx) {
+    this._handleMovement(dt, ctx);
+    this.facing = Vec2.angle(this.pos, this.mouseWorld);
+    if (this.input.mouseDown) {
+      this._tryShoot(dt, ctx);
+    }
+  }
+
+  // ============================================================
+  // CI: 步枪战斗 + 接触D级护送
+  // ============================================================
+  _updateCI(dt, ctx) {
+    this._handleMovement(dt, ctx);
+    this.facing = Vec2.angle(this.pos, this.mouseWorld);
+    if (this.input.mouseDown) {
+      this._tryShoot(dt, ctx);
+    }
+
+    // 接触 D级 NPC 完成护送标记
+    for (const e of ctx.allEntities) {
+      if (e === this || e.dead || e.isPlayer) continue;
+      if (e.faction !== 'DCLASS') continue;
+      const d = Vec2.dist(this.pos, e.pos);
+      if (d < this.pickupRange + 10) {
+        if (!e.escorted) {
+          e.escorted = true;
+          this.dclassEscorted++;
+          ctx.game.logEvent(`接应了 D级人员 (${this.dclassEscorted}/2)`, 'info');
+        }
+      }
     }
   }
 

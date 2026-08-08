@@ -494,6 +494,7 @@ class FacilitySystem {
       case 'mtf_sergeant':return 4;
       case 'ci_soldier':  return 3;
       case 'goc_soldier': return 4;
+      case 'dclass':      return null; // D级无卡, 被困LCZ
       default:            return null;
     }
   }

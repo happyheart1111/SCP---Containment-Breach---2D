@@ -82,6 +82,32 @@ function isAlly(fromFaction, toFaction) {
 const NPC_TYPES = {
 
   // ---- 人类 NPC ----
+  dclass: {
+    name: 'D级人员', faction: 'DCLASS',
+    hp: 80, armor: 0, speed: 90,
+    weapon: null, ammo: 0, fireRate: 0.5,
+    visionRange: 200, visionAngle: CONFIG.VISION_ANGLE,
+    hearRange: CONFIG.HEAR_WALK,
+    behavior: 'civilian', // 逃跑型平民
+    targetPriority: [],
+    retreatThreshold: 0,
+    color: '#ff9933', radius: 8,
+    spawnTime: 0, spawnZone: 'LCZ',
+  },
+
+  scientist: {
+    name: '科学家', faction: 'SCIENTIST',
+    hp: 80, armor: 0, speed: 85,
+    weapon: null, ammo: 0, fireRate: 0.5,
+    visionRange: 200, visionAngle: CONFIG.VISION_ANGLE,
+    hearRange: CONFIG.HEAR_WALK,
+    behavior: 'civilian', // 逃跑型平民
+    targetPriority: [],
+    retreatThreshold: 0,
+    color: '#44ddff', radius: 8,
+    spawnTime: 0, spawnZone: 'LCZ',
+  },
+
   guard: {
     name: '设施警卫', faction: 'FOUNDATION',
     hp: 100, armor: 0.15, speed: 90,
@@ -246,6 +272,8 @@ const ZONES = {
 // ============================================================
 const INITIAL_SPAWNS = [
   { type: 'guard',      count: 2, zone: 'EZ'  },
+  { type: 'dclass',     count: 3, zone: 'LCZ' },
+  { type: 'scientist',  count: 2, zone: 'LCZ' },
   { type: 'scp_173',    count: 1, zone: 'LCZ' },
   { type: 'scp_049',    count: 1, zone: 'HCZ' },
   { type: 'scp_939',    count: 2, zone: 'HCZ' },

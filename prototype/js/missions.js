@@ -38,11 +38,29 @@ class MissionSystem {
           { name: '突破', zone: 'HCZ', desc: '穿越重收容区, 避开SCP, 到达EZ' },
           { name: '逃离', zone: 'SZ',  desc: '到达地表出口, 逃出升天!' },
         ];
+      case 'scientist':
+        return [
+          { name: '收集', zone: 'LCZ', desc: '进入各区域收集SCP文档 (3份)' },
+          { name: '汇合', zone: 'EZ',  desc: '等待MTF救援, 向地表推进' },
+          { name: '撤离', zone: 'SZ',  desc: '带着文档逃出设施' },
+        ];
       case 'mtf':
         return [
           { name: '进入', zone: 'SZ', desc: '从地表进入设施, 突破到EZ' },
           { name: '清剿', zone: 'HCZ', desc: '收容/消灭3个SCP (173/049/939)' },
           { name: '撤离', zone: 'SZ',  desc: '完成任务后返回地表' },
+        ];
+      case 'goc':
+        return [
+          { name: '潜入', zone: 'SZ', desc: '从地表潜入设施, 定位SCP' },
+          { name: '猎杀', zone: 'HCZ', desc: '用能量武器摧毁2个SCP' },
+          { name: '撤离', zone: 'SZ',  desc: '窃取样本后撤往直升机' },
+        ];
+      case 'ci':
+        return [
+          { name: '渗透', zone: 'SZ', desc: '从地表渗透设施' },
+          { name: '接应', zone: 'LCZ', desc: '找到D级人员, 清除基金会阻碍' },
+          { name: '撤离', zone: 'SZ',  desc: '护送D级撤离点' },
         ];
       case 'scp173':
         return [
@@ -63,14 +81,32 @@ class MissionSystem {
       case 'dclass':
         return [
           { level: 'P0', text: '到达地表出口逃离设施', done: false },
-          { level: 'P1', text: '拾取武器(手枪)', done: false },
+          { level: 'P1', text: '拾取武器', done: false },
           { level: 'P2', text: '被MTF招募转职', done: false },
+        ];
+      case 'scientist':
+        return [
+          { level: 'P0', text: '收集3份SCP文档并逃离', done: false },
+          { level: 'P1', text: '保持存活等待MTF救援', done: false },
+          { level: 'P2', text: '与D级合作利用资源', done: false },
         ];
       case 'mtf':
         return [
           { level: 'P0', text: '收容/消灭3个SCP (173/049/939)', done: false },
           { level: 'P1', text: '保护2名科学家NPC存活', done: false },
           { level: 'P2', text: '救援并招募D级', done: false },
+        ];
+      case 'goc':
+        return [
+          { level: 'P0', text: '用能量武器摧毁2个SCP', done: false },
+          { level: 'P1', text: '窃取1个SCP物品样本', done: false },
+          { level: 'P2', text: '在不被MTF攻击下撤离', done: false },
+        ];
+      case 'ci':
+        return [
+          { level: 'P0', text: '击杀3名基金会人员(MTF/警卫/科学家)', done: false },
+          { level: 'P1', text: '接应2名D级人员', done: false },
+          { level: 'P2', text: '利用SCP分散基金会注意力', done: false },
         ];
       case 'scp173':
         return [
@@ -95,9 +131,12 @@ class MissionSystem {
     this._updateObjectives(ctx);
 
     switch (this.role) {
-      case 'dclass':  this._checkDClass(player, ctx);  break;
-      case 'mtf':     this._checkMTF(player, ctx);     break;
-      case 'scp173':  this._checkSCP173(player, ctx);  break;
+      case 'dclass':    this._checkDClass(player, ctx);    break;
+      case 'scientist': this._checkScientist(player, ctx); break;
+      case 'mtf':       this._checkMTF(player, ctx);       break;
+      case 'goc':       this._checkGOC(player, ctx);       break;
+      case 'ci':        this._checkCI(player, ctx);        break;
+      case 'scp173':    this._checkSCP173(player, ctx);    break;
     }
   }
 
@@ -118,6 +157,19 @@ class MissionSystem {
         this.objectives[0].done = player.containedCount >= 3;
         this.objectives[1].done = this._aliveScientists(ctx) >= 2;
         this.objectives[2].done = false; // 原型未实现招募NPC
+        break;
+      case 'scientist':
+        this.objectives[0].done = (player.docCount >= 3 && player.reachedExit) || false;
+        this.objectives[1].done = !player.dead;
+        break;
+      case 'goc':
+        this.objectives[0].done = player.scpKills >= 2;
+        this.objectives[1].done = player.scpKills >= 1; // 击杀SCP即"获得样本"
+        this.objectives[2].done = !player.dead;
+        break;
+      case 'ci':
+        this.objectives[0].done = player.foundationKills >= 3;
+        this.objectives[1].done = player.dclassEscorted >= 2;
         break;
       case 'scp173':
         this.objectives[0].done = player.killCount >= 5;
@@ -166,6 +218,69 @@ class MissionSystem {
         this.resultReason = '你逃出了设施!';
         this.game.onMissionEnd('win', this.resultReason);
       }
+    }
+  }
+
+  // ============================================================
+  // 科学家: 收集3份文档 + 到达出口
+  // ============================================================
+  _checkScientist(player, ctx) {
+    // 阶段推进按区域
+    this._advanceStageByZone(player, ctx);
+
+    // 到达出口: 需集齐文档
+    const exit = ctx.map.exitPoints['SZ'];
+    if (exit) {
+      const ex = exit.col * CONFIG.TILE_SIZE;
+      const ey = exit.row * CONFIG.TILE_SIZE;
+      if (player.pos.x >= ex - CONFIG.TILE_SIZE && player.pos.x <= ex + CONFIG.TILE_SIZE * 2 &&
+          player.pos.y >= ey - CONFIG.TILE_SIZE && player.pos.y <= ey + CONFIG.TILE_SIZE * 2) {
+        player.reachedExit = true;
+        if (player.docCount >= 3) {
+          this.completed = true;
+          this.result = 'win';
+          this.resultReason = '你带着3份SCP文档逃出了设施!';
+          this.game.onMissionEnd('win', this.resultReason);
+        } else {
+          this.game.logEvent(`文档不足! 需要 ${3 - player.docCount} 份 (已收集 ${player.docCount}/3)`, 'combat');
+        }
+      }
+    }
+  }
+
+  // ============================================================
+  // GOC: 摧毁2个SCP (能量武器击杀)
+  // ============================================================
+  _checkGOC(player, ctx) {
+    if (player.scpKills >= 2) {
+      this.completed = true;
+      this.result = 'win';
+      this.resultReason = '2个SCP已被摧毁, 异常威胁清除!';
+      this.game.onMissionEnd('win', this.resultReason);
+    }
+  }
+
+  // ============================================================
+  // CI: 击杀3名基金会人员 + 接应2名D级
+  // ============================================================
+  _checkCI(player, ctx) {
+    if (player.foundationKills >= 3 && player.dclassEscorted >= 2) {
+      this.completed = true;
+      this.result = 'win';
+      this.resultReason = '基金会势力被瓦解, D级人员已获救!';
+      this.game.onMissionEnd('win', this.resultReason);
+    }
+  }
+
+  // 通用: 按所在区域推进阶段
+  _advanceStageByZone(player, ctx) {
+    const tile = ctx.map.worldToTile(player.pos.x, player.pos.y);
+    const zone = ctx.map.getZone(tile.col, tile.row);
+    if (!zone) return;
+    const stageIdx = this.stages.findIndex(s => s.zone === zone);
+    if (stageIdx > this.stage) {
+      this.stage = stageIdx;
+      this.game.onStageAdvance(this.stages[this.stage]);
     }
   }
 
@@ -219,10 +334,15 @@ class MissionSystem {
   }
 
   _getProgress() {
+    const p = this.game.player;
+    if (!p) return 0;
     switch (this.role) {
-      case 'dclass':  return this.game.player ? Math.round(this.game.player.pos.x / (CONFIG.MAP_COLS * CONFIG.TILE_SIZE) * 100) : 0;
-      case 'mtf':     return this.game.player ? Math.round(this.game.player.containedCount / 3 * 100) : 0;
-      case 'scp173':  return this.game.player ? Math.round(this.game.player.killCount / 5 * 100) : 0;
+      case 'dclass':  return Math.round(p.pos.x / (CONFIG.MAP_COLS * CONFIG.TILE_SIZE) * 100);
+      case 'scientist': return Math.round((p.docCount / 3 + (p.reachedExit ? 0.2 : 0)) * 100);
+      case 'mtf':     return Math.round(p.containedCount / 3 * 100);
+      case 'goc':     return Math.round(p.scpKills / 2 * 100);
+      case 'ci':      return Math.round((p.foundationKills / 3 * 0.6 + p.dclassEscorted / 2 * 0.4) * 100);
+      case 'scp173':  return Math.round(p.killCount / 5 * 100);
       default: return 0;
     }
   }

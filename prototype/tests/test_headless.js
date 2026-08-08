@@ -56,15 +56,16 @@ for (let i = 0; i < 3600; i++) {
 }
 console.log('AI模拟60秒: OK', '存活=' + ai.getAliveNPCs().length + ' 事件=' + gameEvents.length);
 
-// 4. 玩家创建 (三种角色各测)
-const roles = ['dclass', 'mtf', 'scp173'];
+// 4. 玩家创建 (六个角色各测)
+const ROLE_ZONES = { dclass: 'LCZ', scientist: 'LCZ', mtf: 'SZ', goc: 'SZ', ci: 'SZ', scp173: 'HCZ' };
+const roles = ['dclass', 'scientist', 'mtf', 'goc', 'ci', 'scp173'];
 for (const role of roles) {
   const map2 = MapGenerator.generate();
   const p2 = new PerceptionSystem(map2);
   const c2 = new CombatSystem();
   const a2 = new AISystem(map2, c2, p2);
   a2.initialize();
-  const zone = role === 'dclass' ? 'LCZ' : role === 'mtf' ? 'SZ' : 'HCZ';
+  const zone = ROLE_ZONES[role];
   const tile = map2.getRandomWalkableTile(zone);
   const player = new Player(role, new Vec2(tile.col * CONFIG.TILE_SIZE + 14, tile.row * CONFIG.TILE_SIZE + 14));
   player.input = { keys: { KeyW: false, KeyS: false, KeyA: false, KeyD: false }, mouseDown: false };

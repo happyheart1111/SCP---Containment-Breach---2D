@@ -78,14 +78,14 @@ class Game {
   startGame(role) {
     this._restartWorld();
 
-    // 出生点 (D级选择离SCP最远的安全点)
+    // 出生点 (D级/科学家选安全点, 其余按区域)
     let spawnZone = 'LCZ';
-    if (role === 'mtf') spawnZone = 'SZ';
+    if (role === 'mtf' || role === 'goc' || role === 'ci') spawnZone = 'SZ';
     if (role === 'scp173') spawnZone = 'HCZ';
 
     let tile = null;
-    if (role === 'dclass') {
-      tile = this._findSafeSpawn('LCZ');
+    if (role === 'dclass' || role === 'scientist') {
+      tile = this._findSafeSpawn(spawnZone);
     } else {
       tile = this.map.getRandomWalkableTile(spawnZone);
     }
@@ -124,7 +124,10 @@ class Game {
   }
 
   _roleName(role) {
-    return { dclass: 'D级人员', mtf: 'MTF特遣队', scp173: 'SCP-173' }[role] || role;
+    return {
+      dclass: 'D级人员', scientist: '科学家', mtf: 'MTF特遣队',
+      goc: 'GOC特工', ci: '混沌分裂者', scp173: 'SCP-173'
+    }[role] || role;
   }
 
   // D级出生点: LCZ 中离所有 SCP 最远的可通行 tile
@@ -194,6 +197,21 @@ class Game {
       this.player.containedCount = Math.min(3, this.player.containedCount + 1);
       this.logEvent(`SCP 收容进度: ${this.player.containedCount}/3`, 'info');
       this.perception.emitNoise(victim.pos, 500, 3, victim);
+    }
+
+    // GOC 目标: 玩家用能量武器击杀 SCP 计入摧毁数
+    if (this.player && this.player.role === 'goc' && victim.isSCP && killer === this.player) {
+      this.player.scpKills = Math.min(2, this.player.scpKills + 1);
+      this.logEvent(`SCP 摧毁进度: ${this.player.scpKills}/2`, 'info');
+      this.perception.emitNoise(victim.pos, 600, 3, victim);
+    }
+
+    // CI 目标: 击杀基金会人员 (MTF/守卫/科学家)
+    if (this.player && this.player.role === 'ci' && killer === this.player) {
+      if (victim.faction === 'FOUNDATION' || victim.faction === 'SCIENTIST') {
+        this.player.foundationKills = Math.min(3, this.player.foundationKills + 1);
+        this.logEvent(`基金会人员清除: ${this.player.foundationKills}/3`, 'info');
+      }
     }
 
     // SCP 猎杀计数
@@ -305,7 +323,10 @@ class Game {
   _initUI() {
     // 角色选择按钮
     document.getElementById('btn-role-dclass').onclick = () => this.startGame('dclass');
+    document.getElementById('btn-role-scientist').onclick = () => this.startGame('scientist');
     document.getElementById('btn-role-mtf').onclick = () => this.startGame('mtf');
+    document.getElementById('btn-role-goc').onclick = () => this.startGame('goc');
+    document.getElementById('btn-role-ci').onclick = () => this.startGame('ci');
     document.getElementById('btn-role-scp173').onclick = () => this.startGame('scp173');
     document.getElementById('btn-menu-again').onclick = () => this._showMenu();
     document.getElementById('btn-menu-restart').onclick = () => this._showMenu();
@@ -390,7 +411,14 @@ class Game {
   // HUD 更新
   // ============================================================
   _updateHUD() {
-    const el = (id) => document.getElementById(id);
+    // 安全取元素: 缺失时返回 no-op 占位, 防止 HUD 错误杀死渲染循环
+    const el = (id) => document.getElementById(id) || {
+      textContent: '',
+      innerHTML: '',
+      style: {},
+      classList: { add() {}, remove() {}, toggle() {} },
+      appendChild() {}, removeChild() {}, scrollTop: 0, scrollHeight: 0, children: [],
+    };
     el('hud-time').textContent = this._formatTime(this.gameTime);
     el('hud-phase').textContent = this.ai.currentPhase;
     el('hud-npcs').textContent = this.ai.getAliveNPCs().length;
@@ -545,31 +573,39 @@ class Game {
 
     const dt = this.paused ? 0 : Math.min(rawDt, 0.05) * this.timeScale;
 
-    if (dt > 0 && this.state !== 'menu') {
-      this.gameTime += dt;
-      this.ai.update(dt, this);
+    // 帧错误保护: 任何异常不得杀死渲染循环
+    try {
+      if (dt > 0 && this.state !== 'menu') {
+        this.gameTime += dt;
+        this.ai.update(dt, this);
 
-      // AI NPC 门禁处理 (有卡自动开门)
-      const ctxFac = this._getCtx();
-      for (const npc of this.ai.entities) {
-        if (npc.isPlayer || npc.dead) continue;
-        this.facilities.handleNPCDoor(npc, ctxFac);
+        // AI NPC 门禁处理 (有卡自动开门)
+        const ctxFac = this._getCtx();
+        for (const npc of this.ai.entities) {
+          if (npc.isPlayer || npc.dead) continue;
+          this.facilities.handleNPCDoor(npc, ctxFac);
+        }
+
+        // 设施系统更新 (特斯拉电门/914)
+        this.facilities.update(dt, ctxFac);
+
+        // 玩家更新
+        if (this.player && !this.player.dead) {
+          const ctx = this._getCtx();
+          this.player.update(dt, ctx);
+          this.missions.update(dt, ctx);
+        }
       }
 
-      // 设施系统更新 (特斯拉电门/914)
-      this.facilities.update(dt, ctxFac);
-
-      // 玩家更新
-      if (this.player && !this.player.dead) {
-        const ctx = this._getCtx();
-        this.player.update(dt, ctx);
-        this.missions.update(dt, ctx);
+      // 渲染
+      this.renderGame();
+      this._updateHUD();
+    } catch (e) {
+      if (this._lastFrameError !== e.message) {
+        this._lastFrameError = e.message;
+        console.error('[FrameError]', e.message);
       }
     }
-
-    // 渲染
-    this.renderGame();
-    this._updateHUD();
 
     requestAnimationFrame(this._loop);
   }

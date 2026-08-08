@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SCP 收容失效 · AI NPC 仿真原型 v0.4</title>
+  <title>SCP 收容失效 · AI NPC 仿真原型 v0.6</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -14,7 +14,7 @@
     <div id="role-menu" class="overlay">
       <div class="menu-box">
         <h1>SCP 收容失效</h1>
-        <p class="menu-sub">AI 多阵营仿真原型 v0.4 — 选择一个角色进入设施</p>
+        <p class="menu-sub">AI 多阵营仿真原型 v0.6 — 选择一个角色进入设施</p>
 
         <div class="role-cards">
           <div class="role-card" id="btn-role-dclass" style="border-color:#ff9933">
@@ -28,6 +28,17 @@
             <div class="role-diff">★★</div>
           </div>
 
+          <div class="role-card" id="btn-role-scientist" style="border-color:#44ddff">
+            <div class="role-icon" style="background:#44ddff">S</div>
+            <div class="role-info">
+              <div class="role-name">科学家</div>
+              <div class="role-tag">P0: 收集3份文档 + 逃离</div>
+              <div class="role-desc">开局带 Lv.2 卡和急救包，无武器。探索各区域收集 SCP 文档，等待 MTF 救援。知识就是生存。</div>
+              <div class="role-controls">WASD 移动 · 进入新区域自动收集文档 · H 使用急救包</div>
+            </div>
+            <div class="role-diff">★★</div>
+          </div>
+
           <div class="role-card" id="btn-role-mtf" style="border-color:#4488ff">
             <div class="role-icon" style="background:#4488ff">M</div>
             <div class="role-info">
@@ -35,6 +46,28 @@
               <div class="role-tag">P0: 收容3个SCP</div>
               <div class="role-desc">全副武装从地表进入。清剿 SCP、击杀 CI、保护科学家。弹药有限，每发都是决策。</div>
               <div class="role-controls">WASD 移动 · 鼠标瞄准 · 左键射击</div>
+            </div>
+            <div class="role-diff">★★★</div>
+          </div>
+
+          <div class="role-card" id="btn-role-goc" style="border-color:#aa44ff">
+            <div class="role-icon" style="background:#aa44ff">G</div>
+            <div class="role-info">
+              <div class="role-name">GOC特工</div>
+              <div class="role-tag">P0: 能量武器摧毁2个SCP</div>
+              <div class="role-desc">全球超自然联盟特工，唯一能对 SCP 造成实质伤害的能量武器。与基金会关系紧张，需同时提防 MTF。</div>
+              <div class="role-controls">WASD 移动 · 鼠标瞄准 · 左键射击 (能量武器对SCP 2x)</div>
+            </div>
+            <div class="role-diff">★★★★</div>
+          </div>
+
+          <div class="role-card" id="btn-role-ci" style="border-color:#44ff44">
+            <div class="role-icon" style="background:#44ff44">C</div>
+            <div class="role-info">
+              <div class="role-name">混沌分裂者</div>
+              <div class="role-tag">P0: 击杀3名基金会 + 接应2名D级</div>
+              <div class="role-desc">基金会的背叛者。清除基金会人员，找到被困的 D 级人员并护送撤离。D 级是你的盟友。</div>
+              <div class="role-controls">WASD 移动 · 鼠标瞄准 · 左键射击 · 靠近D级NPC接应</div>
             </div>
             <div class="role-diff">★★★</div>
           </div>
@@ -103,6 +136,12 @@
         </div>
         <div class="ammo-row">
           <span id="player-ammo">徒手 — 寻找武器</span>
+        </div>
+        <div class="keycard-row">
+          <span id="player-keycard" class="hidden"></span>
+        </div>
+        <div class="ammo-row">
+          <span id="player-914-mode" class="hidden"></span>
         </div>
         <div id="scp-watch-warning" class="watch-warning hidden">⚠ 被注视 — 冻结!</div>
       </div>

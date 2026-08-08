@@ -220,6 +220,9 @@ class NPC {
 
     // 行为模式
     switch (this.behavior) {
+      case 'civilian':
+        this._behaviorCivilian(dt, ctx);
+        break;
       case 'guard':
         this._behaviorGuard(dt, ctx);
         break;
@@ -346,6 +349,12 @@ class NPC {
       return;
     }
 
+    // 无武器人类(平民): 不会交战, 逃跑
+    if (!this.weaponDef) {
+      this.fsm.changeState('flee', ctx);
+      return;
+    }
+
     // 人类战斗行为
     const weaponRange = this.weaponDef.range;
 
@@ -392,6 +401,43 @@ class NPC {
   // ============================================================
   // 行为模式实现
   // ============================================================
+
+  _behaviorCivilian(dt, ctx) {
+    // 平民: 向出口方向逃跑, 遇敌对(SCP)时反方向逃
+    // 最近的敌对威胁 (SCP/僵尸)
+    let nearestThreat = null;
+    let nearestDist = Infinity;
+    for (const e of ctx.allEntities) {
+      if (e === this || e.dead) continue;
+      if (e.faction !== 'SCP' && e.faction !== 'ZOMBIE' && e.faction !== 'WILD') continue;
+      const d = Vec2.dist(this.pos, e.pos);
+      if (d < 180 && d < nearestDist) { nearestDist = d; nearestThreat = e; }
+    }
+
+    // 朝出口 (SZ) 目标移动
+    if (!this.patrolTarget || Vec2.dist(this.pos, this.patrolTarget) < 40) {
+      const exit = ctx.map.exitPoints['SZ'];
+      if (exit) {
+        this.patrolTarget = new Vec2(
+          exit.col * CONFIG.TILE_SIZE,
+          exit.row * CONFIG.TILE_SIZE
+        );
+      } else {
+        const tile = ctx.map.getRandomWalkableTile('EZ');
+        if (tile) this.patrolTarget = new Vec2(
+          tile.col * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2,
+          tile.row * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2
+        );
+      }
+    }
+
+    if (nearestThreat) {
+      // 有威胁: 朝远离威胁的方向
+      this._moveAway(nearestThreat.pos, dt, ctx);
+    } else if (this.patrolTarget) {
+      this._moveTowards(this.patrolTarget, dt, ctx);
+    }
+  }
 
   _behaviorGuard(dt, ctx) {
     // 在出生区域附近巡逻
@@ -745,7 +791,7 @@ class NPC {
       // 死亡声音
       ctx.perception.emitNoise(this.pos, CONFIG.HEAR_RUN, 1.5, this);
     } else {
-      // 受到攻击时, 如果在巡逻, 转警戒
+      // 受到攻击时, 如果在巡逻/警觉
       if (this.fsm.state === 'patrol' || this.fsm.state === 'alert') {
         if (attacker) {
           this.lastSeenTarget = {
@@ -755,7 +801,12 @@ class NPC {
             dist: Vec2.dist(this.pos, attacker.pos),
           };
           this.identifiedTarget = attacker; // 被打 = 立即识别
-          this.fsm.changeState('engage', ctx);
+          // 有武器才交战, 无武器(平民)逃跑
+          if (this.weaponDef) {
+            this.fsm.changeState('engage', ctx);
+          } else {
+            this.fsm.changeState('flee', ctx);
+          }
         }
       }
     }
