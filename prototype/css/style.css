@@ -1,0 +1,193 @@
+/* SCP AI NPC Prototype — Stylesheet */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0a0a0f;
+  --panel: #14141e;
+  --border: #2a2a3a;
+  --text: #c8c8d0;
+  --text-dim: #666680;
+  --accent: #00ccff;
+  --danger: #ff3344;
+  --warn: #ffaa00;
+  --ok: #00ff88;
+
+  --c-dclass: #ff9933;
+  --c-scientist: #44ddff;
+  --c-mtf: #4488ff;
+  --c-goc: #aa44ff;
+  --c-ci: #44ff44;
+  --c-scp: #ff3344;
+  --c-guard: #888899;
+  --c-zombie: #669944;
+  --c-939: #cc66ff;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  overflow: hidden;
+  height: 100vh;
+}
+
+#app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#gameCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+#hud {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+#hud-top {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  background: linear-gradient(180deg, rgba(10,10,15,0.9), transparent);
+  pointer-events: auto;
+}
+
+.hud-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 80px;
+}
+
+.hud-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.hud-panel > span:last-child {
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--accent);
+}
+
+#hud-side {
+  position: absolute;
+  right: 8px;
+  top: 50px;
+  width: 220px;
+  pointer-events: auto;
+}
+
+.faction-card {
+  background: rgba(20,20,30,0.92);
+  border: 1px solid var(--border);
+  border-left: 3px solid;
+  border-radius: 3px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.faction-card .fname { font-weight: 600; }
+.faction-card .fcount {
+  font-size: 14px;
+  font-weight: bold;
+}
+.faction-card .falive { color: var(--ok); }
+.faction-card .fdead { color: var(--danger); }
+
+#hud-bottom {
+  pointer-events: auto;
+  padding: 8px;
+}
+
+#event-log {
+  background: rgba(20,20,30,0.85);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  max-height: 120px;
+  overflow-y: auto;
+  font-size: 12px;
+  font-family: 'Consolas', monospace;
+  line-height: 1.6;
+}
+
+#event-log .log-entry { color: var(--text-dim); }
+#event-log .log-combat { color: var(--danger); }
+#event-log .log-death { color: #ff6677; font-weight: bold; }
+#event-log .log-spawn { color: var(--warn); }
+#event-log .log-info { color: var(--accent); }
+
+#hud-controls {
+  display: flex;
+  gap: 12px;
+  padding: 8px;
+  background: linear-gradient(0deg, rgba(10,10,15,0.9), transparent);
+  pointer-events: auto;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.ctrl-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ctrl-group label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-right: 4px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.ctrl-group button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+
+.ctrl-group button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ctrl-group button.toggle-on {
+  background: rgba(0,204,255,0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ctrl-group button:active {
+  transform: scale(0.95);
+}
+
+/* Scrollbar */
+#event-log::-webkit-scrollbar { width: 4px; }
+#event-log::-webkit-scrollbar-track { background: transparent; }
+#event-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }

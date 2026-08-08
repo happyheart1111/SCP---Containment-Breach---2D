@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SCP 收容失效 · AI NPC 仿真原型</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <canvas id="gameCanvas"></canvas>
+    <div id="hud">
+      <div id="hud-top">
+        <div class="hud-panel">
+          <span class="hud-label">TIME</span>
+          <span id="hud-time">00:00</span>
+        </div>
+        <div class="hud-panel">
+          <span class="hud-label">PHASE</span>
+          <span id="hud-phase">SCP DOMINANT</span>
+        </div>
+        <div class="hud-panel">
+          <span class="hud-label">NPCS</span>
+          <span id="hud-npcs">0</span>
+        </div>
+        <div class="hud-panel">
+          <span class="hud-label">FPS</span>
+          <span id="hud-fps">0</span>
+        </div>
+      </div>
+      <div id="hud-side">
+        <div id="faction-list"></div>
+      </div>
+      <div id="hud-bottom">
+        <div id="event-log"></div>
+      </div>
+      <div id="hud-controls">
+        <div class="ctrl-group">
+          <label>速度</label>
+          <button id="btn-pause">⏸</button>
+          <button id="btn-1x">1x</button>
+          <button id="btn-2x">2x</button>
+          <button id="btn-4x">4x</button>
+        </div>
+        <div class="ctrl-group">
+          <label>显示</label>
+          <button id="btn-vision" class="toggle-on">视野锥</button>
+          <button id="btn-hearing" class="toggle-on">听觉</button>
+          <button id="btn-paths" class="toggle-off">路径</button>
+          <button id="btn-labels" class="toggle-on">标签</button>
+        </div>
+        <div class="ctrl-group">
+          <label>操作</label>
+          <button id="btn-restart">重开</button>
+          <button id="btn-spawn-mtf">+MTF</button>
+          <button id="btn-spawn-ci">+CI</button>
+          <button id="btn-spawn-scp">+SCP</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Core -->
+  <script src="js/config.js"></script>
+  <script src="js/vector2.js"></script>
+  <script src="js/fsm.js"></script>
+  <script src="js/pathfinding.js"></script>
+  <!-- World -->
+  <script src="js/mapsystem.js"></script>
+  <!-- AI -->
+  <script src="js/perception.js"></script>
+  <script src="js/npc.js"></script>
+  <script src="js/npcfactory.js"></script>
+  <script src="js/aisystem.js"></script>
+  <script src="js/combatsystem.js"></script>
+  <!-- Render + Loop -->
+  <script src="js/renderer.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
