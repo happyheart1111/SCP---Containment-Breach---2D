@@ -54,12 +54,26 @@ class Renderer {
     // 计算 offset
     const mapW = CONFIG.MAP_COLS * ts;
     const mapH = CONFIG.MAP_ROWS * ts;
-    const offX = (this.canvas.width - mapW * z) / 2;
-    const offY = (this.canvas.height - mapH * z) / 2;
 
-    ctx.save();
-    ctx.translate(offX, offY);
-    ctx.scale(z, z);
+    // 跟随模式: 玩家居中, 放大视角
+    let offX = (this.canvas.width - mapW * z) / 2;
+    let offY = (this.canvas.height - mapH * z) / 2;
+
+    if (this.followTarget && !this.followTarget.dead) {
+      const followZoom = 1.6;
+      offX = this.canvas.width / 2 - this.followTarget.pos.x * followZoom;
+      offY = this.canvas.height / 2 - this.followTarget.pos.y * followZoom;
+      // 钳制到地图范围
+      offX = Math.min(0, Math.max(this.canvas.width - mapW * followZoom, offX));
+      offY = Math.min(0, Math.max(this.canvas.height - mapH * followZoom, offY));
+      ctx.save();
+      ctx.translate(offX, offY);
+      ctx.scale(followZoom, followZoom);
+    } else {
+      ctx.save();
+      ctx.translate(offX, offY);
+      ctx.scale(z, z);
+    }
 
     // ---- 1. 绘制地图 ----
     this._drawMap(ctx);
@@ -116,9 +130,15 @@ class Renderer {
       ctx.fill();
     }
 
-    // ---- 7. 绘制 NPC ----
+    // ---- 7. 绘制 NPC (跳过玩家) ----
     for (const npc of aiSystem.entities) {
+      if (npc.isPlayer) continue;
       this._drawNPC(ctx, npc);
+    }
+
+    // ---- 7b. 绘制玩家 ----
+    if (this.game && this.game.player && this.game.state === 'playing') {
+      this._drawPlayer(ctx, this.game.player, aiSystem);
     }
 
     // ---- 8. 绘制伤害数字 ----
@@ -370,6 +390,107 @@ class Renderer {
                         npc.fsm.state === 'flee'   ? '#ffff00' : '#888';
         ctx.fillText(npc.fsm.state.toUpperCase(), npc.pos.x, hpY + 12);
       }
+    }
+  }
+
+  // ============================================================
+  // 玩家渲染
+  // ============================================================
+  _drawPlayer(ctx, player, aiSystem) {
+    const c = player.color;
+
+    // 受击闪烁
+    if (player.flashTimer > 0) {
+      ctx.beginPath();
+      ctx.arc(player.pos.x, player.pos.y, player.radius + 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff60';
+      ctx.fill();
+    }
+
+    // SCP-173: 注视警告光环
+    if (player.role === 'scp173') {
+      ctx.beginPath();
+      ctx.arc(player.pos.x, player.pos.y, player.radius + 8, 0, Math.PI * 2);
+      ctx.strokeStyle = player.watched ? '#ff3344' : '#00ff88';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash(player.watched ? [6, 3] : [2, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 身体
+    ctx.beginPath();
+    ctx.arc(player.pos.x, player.pos.y, player.radius, 0, Math.PI * 2);
+    ctx.fillStyle = c;
+    ctx.fill();
+
+    // 白色玩家描边
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // 朝向指示器
+    const fx = player.pos.x + Math.cos(player.facing) * (player.radius + 5);
+    const fy = player.pos.y + Math.sin(player.facing) * (player.radius + 5);
+    ctx.beginPath();
+    ctx.moveTo(player.pos.x, player.pos.y);
+    ctx.lineTo(fx, fy);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // MTF: 鼠标瞄准线
+    if (player.role === 'mtf' && this.game && this.game.mouseWorld) {
+      const mw = this.game.mouseWorld;
+      const dx = mw.x - player.pos.x;
+      const dy = mw.y - player.pos.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = dx / len, ny = dy / len;
+
+      ctx.beginPath();
+      ctx.moveTo(player.pos.x + nx * (player.radius + 4), player.pos.y + ny * (player.radius + 4));
+      ctx.lineTo(player.pos.x + nx * 200, player.pos.y + ny * 200);
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 6]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 准星
+      ctx.beginPath();
+      ctx.arc(mw.x, mw.y, 5, 0, Math.PI * 2);
+      ctx.strokeStyle = '#ff3344';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // 标签
+    if (this.showLabels) {
+      ctx.font = 'bold 10px Consolas';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffffff';
+      const roleName = player.role === 'dclass' ? 'D级' :
+                       player.role === 'mtf' ? 'MTF' : 'SCP-173';
+      ctx.fillText(`你 (${roleName})`, player.pos.x, player.pos.y - player.radius - 8);
+
+      // HP 条
+      const hpW = player.radius * 3;
+      const hpH = 4;
+      const hpX = player.pos.x - hpW / 2;
+      const hpY = player.pos.y + player.radius + 6;
+      ctx.fillStyle = '#333';
+      ctx.fillRect(hpX, hpY, hpW, hpH);
+      ctx.fillStyle = player.hp / player.maxHp > 0.5 ? '#00ff88' :
+                      player.hp / player.maxHp > 0.25 ? '#ffaa00' : '#ff3344';
+      ctx.fillRect(hpX, hpY, hpW * Math.max(0, player.hp / player.maxHp), hpH);
+    }
+
+    // 173: 显示击杀进度
+    if (player.role === 'scp173') {
+      ctx.font = 'bold 12px Consolas';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ff3344';
+      ctx.fillText(`☠ ${player.killCount}/5`, player.pos.x, player.pos.y - player.radius - 20);
     }
   }
 }

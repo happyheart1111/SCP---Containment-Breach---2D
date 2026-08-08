@@ -66,8 +66,9 @@ class AISystem {
       game: game,
     };
 
-    // 更新所有 NPC
+    // 更新所有 NPC (玩家由 game 单独更新)
     for (const npc of this.entities) {
+      if (npc.isPlayer) continue;
       npc.update(dt, ctx);
     }
 

@@ -3,12 +3,72 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SCP 收容失效 · AI NPC 仿真原型</title>
+  <title>SCP 收容失效 · AI NPC 仿真原型 v0.4</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div id="app">
     <canvas id="gameCanvas"></canvas>
+
+    <!-- ===== 角色选择菜单 ===== -->
+    <div id="role-menu" class="overlay">
+      <div class="menu-box">
+        <h1>SCP 收容失效</h1>
+        <p class="menu-sub">AI 多阵营仿真原型 v0.4 — 选择一个角色进入设施</p>
+
+        <div class="role-cards">
+          <div class="role-card" id="btn-role-dclass" style="border-color:#ff9933">
+            <div class="role-icon" style="background:#ff9933">D</div>
+            <div class="role-info">
+              <div class="role-name">D级人员</div>
+              <div class="role-tag">P0: 逃离设施</div>
+              <div class="role-desc">开局一无所有。拾荒、潜行、利用阵营混战，到达地表出口。接触 MTF 可被招募转职。</div>
+              <div class="role-controls">WASD 移动 · 靠近尸体拾取武器 · E 被招募</div>
+            </div>
+            <div class="role-diff">★★</div>
+          </div>
+
+          <div class="role-card" id="btn-role-mtf" style="border-color:#4488ff">
+            <div class="role-icon" style="background:#4488ff">M</div>
+            <div class="role-info">
+              <div class="role-name">MTF特遣队</div>
+              <div class="role-tag">P0: 收容3个SCP</div>
+              <div class="role-desc">全副武装从地表进入。清剿 SCP、击杀 CI、保护科学家。弹药有限，每发都是决策。</div>
+              <div class="role-controls">WASD 移动 · 鼠标瞄准 · 左键射击</div>
+            </div>
+            <div class="role-diff">★★★</div>
+          </div>
+
+          <div class="role-card" id="btn-role-scp173" style="border-color:#ff3344">
+            <div class="role-icon" style="background:#ff3344">S</div>
+            <div class="role-info">
+              <div class="role-name">SCP-173</div>
+              <div class="role-tag">P0: 猎杀5名人类</div>
+              <div class="role-desc">被注视时冻结，未被注视时高速移动。接触人类即秒杀。利用 AI 的视野盲区狩猎。</div>
+              <div class="role-controls">WASD 移动 · 被注视时无法移动 · 接触秒杀</div>
+            </div>
+            <div class="role-diff">★★★★</div>
+          </div>
+        </div>
+
+        <p class="menu-hint">提示: 也可以不选角色, 直接观察 AI 阵营自主交战</p>
+      </div>
+    </div>
+
+    <!-- ===== 游戏结束界面 ===== -->
+    <div id="gameover-screen" class="overlay hidden">
+      <div class="menu-box">
+        <h1 id="gameover-title">任务完成</h1>
+        <p id="gameover-sub"></p>
+        <p id="gameover-stats" class="menu-sub"></p>
+        <div class="menu-buttons">
+          <button id="btn-menu-again" class="menu-btn">重新选择角色</button>
+          <button id="btn-menu-restart" class="menu-btn">返回主菜单</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== HUD ===== -->
     <div id="hud">
       <div id="hud-top">
         <div class="hud-panel">
@@ -28,12 +88,43 @@
           <span id="hud-fps">0</span>
         </div>
       </div>
+
+      <!-- 玩家状态 (左下) -->
+      <div id="player-hud" class="hidden">
+        <div class="player-role-line">
+          <span id="player-role">D级人员</span>
+        </div>
+        <div class="hp-row">
+          <span class="hp-label">HP</span>
+          <div class="hp-bar-bg">
+            <div id="player-hp-bar" style="width:100%"></div>
+          </div>
+          <span id="player-hp-text">100/100</span>
+        </div>
+        <div class="ammo-row">
+          <span id="player-ammo">徒手 — 寻找武器</span>
+        </div>
+        <div id="scp-watch-warning" class="watch-warning hidden">⚠ 被注视 — 冻结!</div>
+      </div>
+
+      <!-- 任务面板 (左上) -->
+      <div id="mission-panel" class="hidden">
+        <div class="mission-title">任务目标</div>
+        <div id="mission-stage">阶段 1/3</div>
+        <div class="mission-bar-bg">
+          <div id="mission-bar" style="width:0%"></div>
+        </div>
+        <div id="mission-objectives"></div>
+      </div>
+
       <div id="hud-side">
         <div id="faction-list"></div>
       </div>
+
       <div id="hud-bottom">
         <div id="event-log"></div>
       </div>
+
       <div id="hud-controls">
         <div class="ctrl-group">
           <label>速度</label>
@@ -51,7 +142,7 @@
         </div>
         <div class="ctrl-group">
           <label>操作</label>
-          <button id="btn-restart">重开</button>
+          <button id="btn-restart">主菜单</button>
           <button id="btn-spawn-mtf">+MTF</button>
           <button id="btn-spawn-ci">+CI</button>
           <button id="btn-spawn-scp">+SCP</button>
@@ -73,6 +164,9 @@
   <script src="js/npcfactory.js"></script>
   <script src="js/aisystem.js"></script>
   <script src="js/combatsystem.js"></script>
+  <!-- Player + Missions -->
+  <script src="js/player.js"></script>
+  <script src="js/missions.js"></script>
   <!-- Render + Loop -->
   <script src="js/renderer.js"></script>
   <script src="js/game.js"></script>

@@ -49,9 +49,10 @@ const FACTIONS = {
 // 阵营关系矩阵 — relation[from][to] = 'ally' | 'enemy' | 'neutral'
 // ============================================================
 const FACTION_RELATIONS = {
-  DCLASS:     { SCIENTIST: 'neutral', FOUNDATION: 'neutral', GOC: 'neutral', CI: 'ally',    SCP: 'enemy',   ZOMBIE: 'enemy', WILD: 'enemy' },
+  DCLASS:     { SCIENTIST: 'neutral', FOUNDATION: 'enemy', GOC: 'neutral', CI: 'ally',    SCP: 'enemy',   ZOMBIE: 'enemy', WILD: 'enemy' },
   SCIENTIST:  { DCLASS: 'neutral',    FOUNDATION: 'ally',    GOC: 'neutral', CI: 'enemy',   SCP: 'enemy',   ZOMBIE: 'enemy', WILD: 'enemy' },
-  FOUNDATION: { DCLASS: 'neutral',    SCIENTIST: 'ally',     GOC: 'tense',   CI: 'enemy',   SCP: 'enemy',   ZOMBIE: 'enemy', WILD: 'enemy' },
+  // FOUNDATION(MTF/守卫) 处决D级 (SCP:SL设定); 科学家仍中立——可被D级利用
+  FOUNDATION: { DCLASS: 'enemy',      SCIENTIST: 'ally',     GOC: 'tense',   CI: 'enemy',   SCP: 'enemy',   ZOMBIE: 'enemy', WILD: 'enemy' },
   GOC:        { DCLASS: 'neutral',    SCIENTIST: 'neutral',  FOUNDATION: 'tense', CI: 'enemy', SCP: 'enemy', ZOMBIE: 'enemy', WILD: 'enemy' },
   CI:         { DCLASS: 'ally',       SCIENTIST: 'enemy',    FOUNDATION: 'enemy', GOC: 'enemy', SCP: 'neutral', ZOMBIE: 'enemy', WILD: 'neutral' },
   SCP:        { DCLASS: 'enemy',      SCIENTIST: 'enemy',    FOUNDATION: 'enemy', GOC: 'enemy', CI: 'neutral', ZOMBIE: 'ally',  WILD: 'ally' },

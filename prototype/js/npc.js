@@ -303,6 +303,14 @@ class NPC {
       return;
     }
 
+    // 目标不再是敌对 (如 D级被招募转职) → 解除交战
+    if (!this._isTargetHostile(this.identifiedTarget)) {
+      this.identifiedTarget = null;
+      this.lastSeenTarget = null;
+      this.fsm.changeState('patrol', ctx);
+      return;
+    }
+
     // HP 过低 -> 撤退 (SCP 和僵尸不撤退)
     if (this.hp <= this.retreatThreshold && this.retreatThreshold > 0 && !this.isSCP) {
       this.fsm.changeState('flee', ctx);
@@ -459,7 +467,7 @@ class NPC {
         const d = Vec2.dist(this.pos, e.pos);
         if (d < nearestDist) { nearestDist = d; nearest = e; }
       }
-      if (nearest && nearestDist < 400) {
+      if (nearest && nearestDist < 320) {
         this._moveTowards(nearest.pos, dt, ctx);
         // 接触即死
         if (nearestDist < this.radius + nearest.radius + 5) {
