@@ -402,6 +402,21 @@ body {
   font-family: 'Consolas', monospace;
 }
 
+.keycard-row {
+  font-size: 12px;
+  font-family: 'Consolas', monospace;
+  margin-top: 2px;
+}
+
+#player-keycard {
+  color: #ffdd44;
+}
+
+#player-914-mode {
+  font-size: 11px;
+  color: var(--warn);
+}
+
 .watch-warning {
   color: #ff3344;
   font-weight: bold;

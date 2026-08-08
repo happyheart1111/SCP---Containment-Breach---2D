@@ -37,8 +37,9 @@ class CombatSystem {
 
     // 记录战斗事件
     if (target.dead) {
+      const killerName = attacker ? attacker.name : '设施';
       ctx.game.logEvent(
-        `${attacker.name} 击杀了 ${target.name}`,
+        `${killerName} 击杀了 ${target.name}`,
         'death'
       );
     }

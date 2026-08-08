@@ -59,6 +59,7 @@ class NPC {
     this.pathIndex = 0;
     this.pathTimer = 0;
     this.patrolTarget = null;
+    this.doorCooldown = 0; // 开门后停留时间
 
     // 状态
     this.fsm = new FSM('patrol', {});
@@ -635,16 +636,16 @@ class NPC {
     const newX = this.pos.x + this.vel.x * dt;
     const newY = this.pos.y + this.vel.y * dt;
 
-    // 碰撞检测: 分轴检测
+    // 碰撞检测: 分轴检测 (含钥匙卡门禁阻挡)
     const tileX = ctx.map.worldToTile(newX + Math.sign(this.vel.x) * this.radius, this.pos.y);
-    if (!ctx.map.isWall(tileX.col, tileX.row)) {
+    if (!ctx.map.isWall(tileX.col, tileX.row) && !ctx.map.isDoorBlocked(tileX.col, tileX.row, ctx.facilities)) {
       this.pos.x = newX;
     } else {
       this.vel.x = 0;
     }
 
     const tileY = ctx.map.worldToTile(this.pos.x, newY + Math.sign(this.vel.y) * this.radius);
-    if (!ctx.map.isWall(tileY.col, tileY.row)) {
+    if (!ctx.map.isWall(tileY.col, tileY.row) && !ctx.map.isDoorBlocked(tileY.col, tileY.row, ctx.facilities)) {
       this.pos.y = newY;
     } else {
       this.vel.y = 0;

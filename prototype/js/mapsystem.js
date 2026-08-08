@@ -56,6 +56,15 @@ class GameMap {
     return this.grid[row][col] === TILE.WALL;
   }
 
+  // 检查该格是否被未开启的钥匙卡门阻挡
+  isDoorBlocked(col, row, facilities) {
+    if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) return false;
+    if (this.grid[row][col] !== TILE.DOOR) return false;
+    if (!facilities) return false;
+    const door = facilities.doors.find(d => d.col === col && d.row === row);
+    return !!door && !door.open;
+  }
+
   // 阻挡视线: 墙壁挡, 门不挡, 走廊不挡
   blocksSight(col, row) {
     if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) return true;

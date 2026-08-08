@@ -41,7 +41,7 @@ class Renderer {
     };
   }
 
-  render(aiSystem, combat, perception, gameTime) {
+  render(aiSystem, combat, perception, facilities, gameTime) {
     const ctx = this.ctx;
     ctx.fillStyle = '#050508';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -128,6 +128,11 @@ class Renderer {
       ctx.arc(b.x, b.y, 2, 0, Math.PI * 2);
       ctx.fillStyle = b.color;
       ctx.fill();
+    }
+
+    // ---- 6b. 绘制设施 (门禁/914/特斯拉电门) ----
+    if (facilities) {
+      this._drawFacilities(ctx, facilities, gameTime);
     }
 
     // ---- 7. 绘制 NPC (跳过玩家) ----
@@ -492,5 +497,169 @@ class Renderer {
       ctx.fillStyle = '#ff3344';
       ctx.fillText(`☠ ${player.killCount}/5`, player.pos.x, player.pos.y - player.radius - 20);
     }
+  }
+
+  // ============================================================
+  // 设施渲染: 钥匙卡门禁 / SCP-914 / 特斯拉电门
+  // ============================================================
+  _drawFacilities(ctx, facilities, gameTime) {
+    // ---- 钥匙卡门禁 ----
+    for (const door of facilities.doors) {
+      const w = this.map.tileToWorld(door.col, door.row);
+      const x = w.x, y = w.y;
+      const ts = CONFIG.TILE_SIZE;
+
+      if (door.open) {
+        // 开启: 亮色通道
+        ctx.fillStyle = 'rgba(0,255,136,0.15)';
+        ctx.fillRect(x - ts / 2, y - ts / 2, ts, ts);
+        ctx.strokeStyle = 'rgba(0,255,136,0.4)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - ts / 2, y - ts / 2, ts, ts);
+      } else {
+        // 锁定: 暗色门 + 锁图标 + 等级
+        ctx.fillStyle = '#2a2a3a';
+        ctx.fillRect(x - ts / 2, y - ts / 2, ts, ts);
+        ctx.strokeStyle = 'rgba(255,51,68,0.6)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x - ts / 2, y - ts / 2, ts, ts);
+
+        // 锁图标
+        ctx.fillStyle = '#ff5566';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('🔒', x, y - 2);
+
+        // 等级标签
+        ctx.fillStyle = door.level >= 5 ? '#ff44aa' : '#ffaa00';
+        ctx.font = 'bold 9px Consolas';
+        ctx.fillText('Lv.' + door.level, x, y + ts * 0.35);
+      }
+    }
+
+    // ---- SCP-914 ----
+    for (const m of facilities.machines914) {
+      const ts2 = CONFIG.TILE_SIZE;
+
+      // 进料舱/出料舱
+      this._draw914Booth(ctx, m.intakePos, 'INTAKE', '进料');
+      this._draw914Booth(ctx, m.outputPos, 'OUTPUT', '出料');
+
+      // 主体
+      ctx.fillStyle = '#3a2a1a';
+      ctx.strokeStyle = '#8a6a3a';
+      ctx.lineWidth = 2;
+      ctx.fillRect(m.panelPos.x - ts2 * 0.9, m.panelPos.y - ts2 * 0.7, ts2 * 1.8, ts2 * 1.4);
+      ctx.strokeRect(m.panelPos.x - ts2 * 0.9, m.panelPos.y - ts2 * 0.7, ts2 * 1.8, ts2 * 1.4);
+
+      // 齿轮动画
+      ctx.save();
+      ctx.translate(m.panelPos.x, m.panelPos.y - ts2 * 0.5);
+      ctx.rotate(m.processing ? gameTime * 3 : gameTime * 0.5);
+      ctx.strokeStyle = '#b08a4a';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -8); ctx.lineTo(0, 8);
+      ctx.moveTo(-8, 0); ctx.lineTo(8, 0);
+      ctx.stroke();
+      ctx.restore();
+
+      // 模式显示
+      ctx.fillStyle = m.processing ? '#ffaa00' : '#00ccff';
+      ctx.font = 'bold 11px Consolas';
+      ctx.textAlign = 'center';
+      ctx.fillText(m.mode, m.panelPos.x, m.panelPos.y + ts2 * 0.5);
+
+      // 面板标签
+      ctx.fillStyle = '#aa8866';
+      ctx.font = '8px sans-serif';
+      ctx.fillText('SCP-914', m.panelPos.x, m.panelPos.y - ts2 * 0.9);
+
+      // 处理中动画
+      if (m.processing) {
+        ctx.fillStyle = '#ffaa00';
+        ctx.font = '10px Consolas';
+        ctx.fillText('加工中...', m.panelPos.x, m.panelPos.y + ts2 * 0.8);
+      }
+
+      // 结果提示
+      if (m.lastResult && m.resultTimer > 0) {
+        ctx.fillStyle = '#00ff88';
+        ctx.font = 'bold 11px Consolas';
+        ctx.fillText(m.lastResult, m.panelPos.x, m.panelPos.y + ts2 * 1.1);
+      }
+    }
+
+    // ---- 特斯拉电门 ----
+    for (const gate of facilities.teslaGates) {
+      const ts3 = CONFIG.TILE_SIZE;
+      const x = gate.pos.x, y = gate.pos.y;
+
+      // 底座
+      ctx.fillStyle = '#1a1a2a';
+      ctx.fillRect(x - ts3 * 0.5, y - ts3 * 0.3, ts3, ts3 * 0.6);
+
+      // 两个线圈柱
+      ctx.fillStyle = '#334';
+      ctx.fillRect(x - ts3 * 0.45, y - ts3 * 0.5, ts3 * 0.2, ts3);
+      ctx.fillRect(x + ts3 * 0.25, y - ts3 * 0.5, ts3 * 0.2, ts3);
+
+      // 顶部球
+      ctx.fillStyle = gate.state === 'discharging' ? '#88ffff' :
+                      gate.state === 'charging' ? '#4488ff' : '#555577';
+      ctx.beginPath();
+      ctx.arc(x - ts3 * 0.35, y - ts3 * 0.5, 3, 0, Math.PI * 2);
+      ctx.arc(x + ts3 * 0.35, y - ts3 * 0.5, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 充能: 蓝色波纹
+      if (gate.state === 'charging') {
+        const pulse = 0.4 + 0.6 * Math.sin(gameTime * 20);
+        ctx.strokeStyle = `rgba(68,136,255,${0.3 + pulse * 0.4})`;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.strokeRect(x - ts3 * 0.6, y - ts3 * 0.6, ts3 * 1.2, ts3 * 1.2);
+        ctx.setLineDash([]);
+      }
+
+      // 放电: 电弧
+      if (gate.state === 'discharging') {
+        ctx.strokeStyle = 'rgba(120,220,255,0.9)';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 8; i++) {
+          const fx = x + (Math.random() - 0.5) * ts3 * 1.2;
+          const fy = y + (Math.random() - 0.5) * ts3 * 1.2;
+          ctx.beginPath();
+          ctx.moveTo(x - ts3 * 0.35, y);
+          ctx.lineTo(fx, fy);
+          ctx.stroke();
+        }
+
+        // 电弧粒子
+        for (const p of gate.arcParticles) {
+          ctx.fillStyle = `rgba(120,220,255,${Math.max(0, p.life / p.maxLife)})`;
+          ctx.beginPath();
+          ctx.arc(p.x + p.dx * (1 - p.life / p.maxLife), p.y + p.dy * (1 - p.life / p.maxLife), 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+
+  _draw914Booth(ctx, pos, label, labelCn) {
+    const ts = CONFIG.TILE_SIZE;
+    ctx.fillStyle = '#2a241a';
+    ctx.strokeStyle = '#6a5a3a';
+    ctx.lineWidth = 1;
+    ctx.fillRect(pos.x - ts * 0.6, pos.y - ts * 0.6, ts * 1.2, ts * 1.2);
+    ctx.strokeRect(pos.x - ts * 0.6, pos.y - ts * 0.6, ts * 1.2, ts * 1.2);
+
+    ctx.fillStyle = '#8a7a5a';
+    ctx.font = 'bold 8px Consolas';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, pos.x, pos.y + 3);
   }
 }

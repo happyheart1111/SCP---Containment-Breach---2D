@@ -49,6 +49,8 @@ class Game {
     this.combat = new CombatSystem();
     // AI
     this.ai = new AISystem(this.map, this.combat, this.perception);
+    // 设施 (钥匙卡门禁/914/特斯拉电门)
+    this.facilities = new FacilitySystem(this.map);
     // 任务
     this.missions = new MissionSystem(this);
     // 渲染
@@ -158,6 +160,7 @@ class Game {
     this.perception = new PerceptionSystem(this.map);
     this.combat = new CombatSystem();
     this.ai = new AISystem(this.map, this.combat, this.perception);
+    this.facilities = new FacilitySystem(this.map);
     this.missions = new MissionSystem(this);
     this.renderer.setMap(this.map);
     this.ai.initialize();
@@ -260,6 +263,11 @@ class Game {
       // 回车重新开始 (gameover 时)
       if (this.state === 'gameover' && e.code === 'Enter') {
         this._showMenu();
+      }
+      // E 键交互 (开门/914)
+      if (e.code === 'KeyE' && this.state === 'playing' && this.player && !this.player.dead) {
+        const ctx = this._getCtx();
+        this.player.tryInteract(ctx);
       }
       e.preventDefault();
     });
@@ -432,6 +440,27 @@ class Game {
         el('player-ammo').textContent = '徒手 — 寻找武器';
       }
 
+      // 钥匙卡显示
+      const keycardEl = el('player-keycard');
+      if (this.player.keycardLevel > 0) {
+        const card = KEYCARDS[this.player.keycardLevel];
+        keycardEl.textContent = card ? `${card.name} (${card.role})` : '万能钥匙卡';
+        keycardEl.style.color = card ? card.color : '#fff';
+        keycardEl.classList.remove('hidden');
+      } else {
+        keycardEl.classList.add('hidden');
+      }
+
+      // SCP-914 模式提示
+      const modeEl = el('player-914-mode');
+      const nearby914 = this.facilities.getNearby914(this.player.pos, CONFIG.TILE_SIZE * 2.5);
+      if (nearby914) {
+        modeEl.textContent = `SCP-914 [${nearby914.mode}] — E切换模式 / 进料舱内E激活`;
+        modeEl.classList.remove('hidden');
+      } else {
+        modeEl.classList.add('hidden');
+      }
+
       // 角色名
       el('player-role').textContent = this._roleName(this.player.role) +
         (this.player.recruited ? ' (MTF新兵)' : '');
@@ -479,6 +508,25 @@ class Game {
     }
   }
 
+  // 构建共享 ctx (玩家/AI/设施共用)
+  _getCtx() {
+    return {
+      map: this.map,
+      allEntities: this.ai.entities,
+      perception: this.perception,
+      combat: this.combat,
+      facilities: this.facilities,
+      gameTime: this.gameTime,
+      game: this,
+      player: this.player,
+    };
+  }
+
+  // 渲染
+  renderGame() {
+    this.renderer.render(this.ai, this.combat, this.perception, this.facilities, this.gameTime);
+  }
+
   // ============================================================
   // 主循环
   // ============================================================
@@ -501,26 +549,26 @@ class Game {
       this.gameTime += dt;
       this.ai.update(dt, this);
 
+      // AI NPC 门禁处理 (有卡自动开门)
+      const ctxFac = this._getCtx();
+      for (const npc of this.ai.entities) {
+        if (npc.isPlayer || npc.dead) continue;
+        this.facilities.handleNPCDoor(npc, ctxFac);
+      }
+
+      // 设施系统更新 (特斯拉电门/914)
+      this.facilities.update(dt, ctxFac);
+
       // 玩家更新
       if (this.player && !this.player.dead) {
-        const ctx = {
-          map: this.map,
-          allEntities: this.ai.entities,
-          perception: this.perception,
-          combat: this.combat,
-          gameTime: this.gameTime,
-          game: this,
-          player: this.player,
-        };
+        const ctx = this._getCtx();
         this.player.update(dt, ctx);
         this.missions.update(dt, ctx);
-      } else if (this.player && this.player.dead && this.state === 'playing') {
-        // 玩家死亡但任务未结算 (mission.onPlayerDied 已处理)
       }
     }
 
     // 渲染
-    this.renderer.render(this.ai, this.combat, this.perception, this.gameTime);
+    this.renderGame();
     this._updateHUD();
 
     requestAnimationFrame(this._loop);

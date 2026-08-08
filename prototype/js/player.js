@@ -46,6 +46,10 @@ class Player {
     // 转职状态 (D级)
     this.recruited = false;   // 被MTF招募
 
+    // 设施交互
+    this.keycardLevel = 0;    // 0=无卡, 1-5=等级, 0(Omni) 特殊
+    this.interactRange = CONFIG.TILE_SIZE * 1.2; // 交互距离
+
     // 输入引用 (由 game 注入)
     this.input = null;
     this.mouseWorld = new Vec2(0, 0);
@@ -58,6 +62,7 @@ class Player {
     switch (this.role) {
       case 'dclass':
         this.weapon = null; // 无武器, 需拾取
+        this.keycardLevel = 1; // 清洁工卡 (Lv.1)
         this.ammo = 0;
         break;
       case 'mtf':
@@ -67,6 +72,7 @@ class Player {
         this.maxHp = 150;
         this.armor = 0.30;
         this.speed = 120;
+        this.keycardLevel = 4; // 特工卡 (Lv.4)
         break;
       case 'scp173':
         this.weapon = 'touch_kill';
@@ -75,6 +81,7 @@ class Player {
         this.maxHp = 500;
         this.armor = 1.0;
         this.speed = 260;
+        this.keycardLevel = 0; // Omni: SCP 能过任何门
         break;
     }
   }
@@ -221,17 +228,17 @@ class Player {
       this.vel.y *= 0.8;
     }
 
-    // 移动 + 碰撞 (复用NPC碰撞逻辑)
+    // 移动 + 碰撞 (含钥匙卡门禁阻挡)
     const newX = this.pos.x + this.vel.x * dt;
     const newY = this.pos.y + this.vel.y * dt;
 
     const tileX = ctx.map.worldToTile(newX + Math.sign(this.vel.x || 1) * this.radius, this.pos.y);
-    if (!ctx.map.isWall(tileX.col, tileX.row)) {
+    if (!ctx.map.isWall(tileX.col, tileX.row) && !ctx.map.isDoorBlocked(tileX.col, tileX.row, ctx.facilities)) {
       this.pos.x = newX;
     }
 
     const tileY = ctx.map.worldToTile(this.pos.x, newY + Math.sign(this.vel.y || 1) * this.radius);
-    if (!ctx.map.isWall(tileY.col, tileY.row)) {
+    if (!ctx.map.isWall(tileY.col, tileY.row) && !ctx.map.isDoorBlocked(tileY.col, tileY.row, ctx.facilities)) {
       this.pos.y = newY;
     }
 
@@ -320,6 +327,103 @@ class Player {
     }
     return false;
   }
+
+  // ============================================================
+  // E 键交互 (由 game 调用)
+  // 优先级: 914进料舱(激活) > 914面板(切模式) > 门禁(开门) > 尸体(捡钥匙卡)
+  // ============================================================
+  tryInteract(ctx) {
+    if (this.dead) return;
+
+    const facilities = ctx.facilities;
+    if (!facilities) return;
+
+    const machine = facilities.getNearby914(this.pos, CONFIG.TILE_SIZE * 2.5);
+
+    // 1. SCP-914 进料舱: 激活 (最高优先级)
+    if (machine && !machine.processing) {
+      const distIntake = Vec2.dist(this.pos, machine.intakePos);
+      if (distIntake < CONFIG.TILE_SIZE * 1.2) {
+        const ok = facilities.activate914(machine, ctx);
+        if (ok) {
+          ctx.game.logEvent('SCP-914 开始加工...', 'info');
+          return;
+        }
+      }
+    }
+
+    // 2. SCP-914 面板: 切换模式
+    if (machine) {
+      const distPanel = Vec2.dist(this.pos, machine.panelPos);
+      if (distPanel < CONFIG.TILE_SIZE * 1.5) {
+        if (machine.processing) {
+          ctx.game.logEvent('SCP-914 正在加工中...', 'info');
+          return;
+        }
+        facilities.cycle914Mode(machine);
+        ctx.game.logEvent(`SCP-914 模式: ${machine.mode}`, 'info');
+        return;
+      }
+    }
+
+    // 3. 门禁: 开门
+    const door = facilities.getNearbyDoor(this.pos);
+    if (door) {
+      if (door.open) {
+        ctx.game.logEvent(`${door.name} 已开启`, 'info');
+        return;
+      }
+      const ok = facilities.tryOpenDoor(door, this.keycardLevel, ctx);
+      if (ok) {
+        ctx.game.logEvent(`${door.name} 已解锁 [卡Lv.${this._cardDisplay(this.keycardLevel)}]`, 'info');
+      } else {
+        ctx.game.logEvent(`权限不足! ${door.name} 需要 Lv.${door.level}`, 'combat');
+      }
+      return;
+    }
+
+    // 4. 尸体: 捡钥匙卡 (提升卡等级)
+    this._tryPickupKeycard(ctx);
+  }
+
+  _cardDisplay(level) {
+    if (level === 0) return 'Omni';
+    return level;
+  }
+
+  _tryPickupKeycard(ctx) {
+    for (const e of ctx.allEntities) {
+      if (!e.dead || e.faction === this.faction) continue;
+      // 人类尸体可能有卡
+      if (e.isSCP) continue;
+      const npcCard = e.typeId ? this._npcCardFromType(e.typeId) : null;
+      if (!npcCard) continue;
+
+      const d = Vec2.dist(this.pos, e.pos);
+      if (d < this.pickupRange) {
+        // 只捡更高等级的卡
+        const current = this.keycardLevel === 0 ? 99 : this.keycardLevel;
+        if (npcCard > current) {
+          this.keycardLevel = npcCard;
+          ctx.game.logEvent(`捡到了 ${KEYCARDS[npcCard].name}`, 'info');
+          return;
+        }
+      }
+    }
+  }
+
+  _npcCardFromType(typeId) {
+    switch (typeId) {
+      case 'guard':       return 3;
+      case 'scientist':   return 2;
+      case 'mtf_private': return 4;
+      case 'mtf_sergeant':return 5;
+      case 'ci_soldier':  return 3;
+      case 'goc_soldier': return 4;
+      default:            return null;
+    }
+  }
+
 
   // ============================================================
   // 受击

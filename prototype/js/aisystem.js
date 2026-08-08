@@ -62,6 +62,7 @@ class AISystem {
       allEntities: this.entities,
       perception: this.perception,
       combat: this.combat,
+      facilities: game.facilities || null,
       gameTime: this.gameTime,
       game: game,
     };
