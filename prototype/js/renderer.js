@@ -10,6 +10,12 @@ class Renderer {
     this.world = world;
     this.map = world ? world.getLevel(world.currentLevelId) : null;
     this.camera = { x: 0, y: 0, zoom: 1 };
+    this.followZoom = 1.6;   // 跟随模式缩放 (角色居中, 地图滚动)
+    this.followZoomMin = 0.8;
+    this.followZoomMax = 3.0;
+    this._camX = null;
+    this._camY = null;
+    this._camLevel = null;
     this.showVision = true;
     this.showHearing = true;
     this.showPaths = false;
@@ -17,6 +23,22 @@ class Renderer {
 
     this._resize();
     window.addEventListener('resize', () => this._resize());
+  }
+
+  // 缩放控制 (玩家可见控制: 滚轮/按钮)
+  zoomIn() {
+    this.followZoom = Math.min(this.followZoomMax, this.followZoom + 0.2);
+    this._camX = null; this._camY = null; // 立即重定位
+  }
+
+  zoomOut() {
+    this.followZoom = Math.max(this.followZoomMin, this.followZoom - 0.2);
+    this._camX = null; this._camY = null;
+  }
+
+  resetZoom() {
+    this.followZoom = 1.6;
+    this._camX = null; this._camY = null;
   }
 
   setWorld(world) {
@@ -58,6 +80,12 @@ class Renderer {
     }
     const map = this.world ? this.world.getLevel(levelId) : this.map;
     if (!map) return;
+    // 地图切换时重置平滑相机
+    if (this._camLevel !== levelId) {
+      this._camLevel = levelId;
+      this._camX = null;
+      this._camY = null;
+    }
     this.map = map;
 
     const ts = CONFIG.TILE_SIZE;
@@ -68,11 +96,25 @@ class Renderer {
     let offY = (this.canvas.height - mapH * this.camera.zoom) / 2;
 
     if (this.followTarget && !this.followTarget.dead) {
-      const followZoom = 1.6;
-      offX = this.canvas.width / 2 - this.followTarget.pos.x * followZoom;
-      offY = this.canvas.height / 2 - this.followTarget.pos.y * followZoom;
-      offX = Math.min(0, Math.max(this.canvas.width - mapW * followZoom, offX));
-      offY = Math.min(0, Math.max(this.canvas.height - mapH * followZoom, offY));
+      // 玩家视角跟随角色: 角色固定在屏幕中心, 移动时地图滚动
+      const followZoom = this.followZoom || 1.6;
+      // 平滑跟随 (相机朝目标位置缓动)
+      const targetX = this.canvas.width / 2 - this.followTarget.pos.x * followZoom;
+      const targetY = this.canvas.height / 2 - this.followTarget.pos.y * followZoom;
+      // 钳制到地图范围
+      const clampX = Math.min(0, Math.max(this.canvas.width - mapW * followZoom, targetX));
+      const clampY = Math.min(0, Math.max(this.canvas.height - mapH * followZoom, targetY));
+
+      if (this._camX === null || this._camY === null) {
+        this._camX = clampX;
+        this._camY = clampY;
+      }
+      // 平滑插值 (0.12 每帧, 视觉上角色不动地图动)
+      this._camX += (clampX - this._camX) * 0.12;
+      this._camY += (clampY - this._camY) * 0.12;
+
+      offX = this._camX;
+      offY = this._camY;
       ctx.save();
       ctx.translate(offX, offY);
       ctx.scale(followZoom, followZoom);

@@ -353,7 +353,7 @@ class Game {
       const r = this.renderer;
       let zoom, offX, offY;
       if (this.cameraFollow && this.player && !this.player.dead) {
-        zoom = 1.6;
+        zoom = r.followZoom || 1.6;
         offX = this.canvas.width / 2 - this.player.pos.x * zoom;
         offY = this.canvas.height / 2 - this.player.pos.y * zoom;
         offX = Math.min(0, Math.max(this.canvas.width - mapW * zoom, offX));
@@ -367,6 +367,13 @@ class Game {
       this.mouseWorld.x = (sx - offX) / zoom;
       this.mouseWorld.y = (sy - offY) / zoom;
     });
+
+    // 滚轮缩放 (玩家可见控制)
+    this.canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (e.deltaY < 0) this.renderer.zoomIn();
+      else this.renderer.zoomOut();
+    }, { passive: false });
   }
 
   // ============================================================
@@ -446,6 +453,11 @@ class Game {
     bind('btn-hearing', toggle('showHearing'));
     bind('btn-paths', toggle('showPaths'));
     bind('btn-labels', toggle('showLabels'));
+
+    // 镜头控制 (玩家可见控制: 缩放)
+    bind('btn-zoom-in', () => this.renderer.zoomIn());
+    bind('btn-zoom-out', () => this.renderer.zoomOut());
+    bind('btn-zoom-reset', () => this.renderer.resetZoom());
 
     // 操作
     bind('btn-restart', () => this._showMenu());

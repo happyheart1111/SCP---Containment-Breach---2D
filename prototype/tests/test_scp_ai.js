@@ -150,24 +150,42 @@ const mockGame = {
   const human = ai.spawnNPC('guard', 'HCZ');
   // 人类持枪面朝173, 持续注视
   human.weapon = 'rifle';
-  human.pos.x = scp.pos.x - 60; human.pos.y = scp.pos.y;
-  human.facing = Math.PI; // 面朝右 (173在右边)
+  human.pos.x = scp.pos.x - 40; human.pos.y = scp.pos.y;
+  human.facing = 0; // 面朝右 (173在右边)
+
+  // 强制清空两者间视线 (避免大地图随机墙遮挡)
+  const map4 = world.getLevel('HCZ');
+  const t1 = map4.worldToTile(scp.pos.x, scp.pos.y);
+  const t2 = map4.worldToTile(human.pos.x, human.pos.y);
+  for (let r = Math.min(t1.row, t2.row) - 1; r <= Math.max(t1.row, t2.row) + 1; r++) {
+    for (let c = t1.col - 3; c <= t1.col + 3; c++) {
+      if (r >= 0 && r < map4.rows && c >= 0 && c < map4.cols) map4.grid[r][c] = get('TILE').CORRIDOR;
+    }
+  }
 
   let frozen = false;
-  let movedDuringBlink = false;
+  let blinkMoved = false;
   let prevPos = scp.pos.clone();
   for (let i = 0; i < 60 * 10; i++) {
     ai.update(1/60, mockGame);
-    const watched = !scp.blinking && scp._isBeingWatched(ai.ctxFor(scp, mockGame));
-    if (watched) {
+    // 每帧强制人类固定并注视 173 (隔离测试)
+    human.pos.x = scp.pos.x - 40; human.pos.y = scp.pos.y;
+    human.facing = 0;
+
+    // 眨眼中: 检查是否发生移动 (173 未被注视时朝人类移动)
+    if (scp.blinking) {
       const moved = Vec2.dist(prevPos, scp.pos);
-      if (moved > 0.5) movedDuringBlink = true; // 被注视但动了 = 眨眼中
+      if (moved > 0.5) blinkMoved = true;
     }
     prevPos = scp.pos.clone();
-    if (watched) frozen = true;
+
+    // 注视中 (非眨眼): 应冻结
+    if (!scp.blinking && scp._isBeingWatched(ai.ctxFor(scp, mockGame))) {
+      frozen = true;
+    }
   }
   console.log('测试4 SCP-173 注视冻结:');
-  console.log('  被注视时冻结:', frozen ? 'PASS(有冻结状态)' : 'FAIL', '| 眨眼期间移动:', movedDuringBlink ? 'PASS' : 'CHECK');
+  console.log('  被注视时冻结:', frozen ? 'PASS(有冻结状态)' : 'FAIL', '| 眨眼期间移动:', blinkMoved ? 'PASS' : 'FAIL');
 }
 
 console.log('SCP AI 行为测试完成');

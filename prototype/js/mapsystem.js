@@ -136,8 +136,8 @@ class MapGenerator {
       }
     }
 
-    // 2. 中央基地建筑 (矩形墙 + 内部房间)
-    const bx = 14, by = 10, bw = 20, bh = 12; // 建筑范围
+    // 2. 中央基地建筑 (矩形墙 + 内部房间) — 扩大版
+    const bx = 17, by = 12, bw = 24, bh = 14; // 建筑范围
     // 外墙
     for (let c = bx; c < bx + bw; c++) {
       map.grid[by][c] = TILE.WALL;
@@ -154,95 +154,194 @@ class MapGenerator {
       }
     }
     // 内墙分割成房间
-    const wy = by + 4;
+    const wy = by + 5;
     for (let c = bx + 1; c < bx + bw - 1; c++) map.grid[wy][c] = TILE.WALL;
-    const wx = bx + 6;
-    for (let r = by + 5; r < by + bh - 1; r++) map.grid[r][wx] = TILE.WALL;
-    const wx2 = bx + 14;
-    for (let r = by + 1; r < by + 4; r++) map.grid[r][wx2] = TILE.WALL;
+    const wx = bx + 7;
+    for (let r = by + 6; r < by + bh - 1; r++) map.grid[r][wx] = TILE.WALL;
+    const wx2 = bx + 17;
+    for (let r = by + 1; r < by + 5; r++) map.grid[r][wx2] = TILE.WALL;
 
     // 门洞
-    map.grid[by + 6][bx] = TILE.CORRIDOR;      // 建筑正门
+    map.grid[by + 7][bx] = TILE.CORRIDOR;      // 建筑正门
     map.grid[by + 2][wx2] = TILE.CORRIDOR;
-    map.grid[by + 6][wx] = TILE.CORRIDOR;
-    map.grid[wy][bx + 3] = TILE.CORRIDOR;
-    map.grid[by + 8][bx + bw - 1] = TILE.CORRIDOR; // 后门
+    map.grid[by + 7][wx] = TILE.CORRIDOR;
+    map.grid[wy][bx + 4] = TILE.CORRIDOR;
+    map.grid[by + 10][bx + bw - 1] = TILE.CORRIDOR; // 后门
 
     // 3. 障碍物(停机坪边缘护栏、路障等) — 随机小柱子
     const pillars = [
-      [4, 3], [8, 26], [26, 3], [34, 26], [44, 8], [44, 20],
-      [3, 15], [40, 4], [8, 6], [36, 28], [20, 2], [2, 24],
+      [4, 3], [10, 30], [30, 3], [42, 30], [52, 8], [52, 26],
+      [3, 17], [48, 4], [10, 6], [44, 32], [24, 2], [2, 28],
+      [52, 16], [8, 20], [36, 33],
     ];
     for (const [c, r] of pillars) {
       if (c > 0 && c < W - 1 && r > 0 && r < H - 1) map.grid[r][c] = TILE.WALL;
     }
 
     // 4. 直升机停机坪标记 (左上开阔地)
-    const pad = { x: 3, y: 3 };
+    const pad = { x: 4, y: 4 };
     map.spawnPoints['HELI'] = pad;
 
     // 5. 传送点槽位: 建筑入口大厅 (地图世界绑定为 SZ-EZ 检查点)
-    map.portalSlots.push({ id: 'SZ-EZ', col: bx + 6, row: by + 6 });
+    map.portalSlots.push({ id: 'SZ-EZ', col: bx + 7, row: by + 7 });
   }
 
   // ============================================================
-  // 随机区域 (EZ/HCZ/LCZ) — BSP 房间
+  // 随机区域 (EZ/HCZ/LCZ) — SCP:SL 风格: 直走廊网格 + 路口 + 贴走廊房间
+  // 参考 SCP:SL: 宽阔直走廊(2格)构成主干, 十字/T型路口,
+  // 房间紧贴走廊两侧, 检查点/电梯在关键路口
   // ============================================================
   static _generateRandomZone(map, levelId) {
-    const pad = 1;
-    const rooms = this._bspRooms(pad, pad, map.cols - pad * 2, map.rows - pad * 2, 4);
-    const placedRooms = [];
+    const W = map.cols, H = map.rows;
 
-    for (const room of rooms) {
-      for (let r = room.y; r < room.y + room.h; r++) {
-        for (let c = room.x; c < room.x + room.w; c++) {
-          if (r >= 0 && r < map.rows && c >= 0 && c < map.cols) {
-            map.grid[r][c] = TILE.ROOM_FLOOR;
+    // ---- 1. 主干走廊网格 (水平 + 垂直, 宽2格) ----
+    const hRows = [];  // 水平走廊所在行 (走廊占 y, y+1)
+    const vCols = [];  // 垂直走廊所在列 (走廊占 x, x+1)
+
+    let y = 5 + Math.floor(Math.random() * 3);
+    while (y < H - 6) {
+      hRows.push(y);
+      y += 10 + Math.floor(Math.random() * 5);
+    }
+    let x = 6 + Math.floor(Math.random() * 3);
+    while (x < W - 6) {
+      vCols.push(x);
+      x += 12 + Math.floor(Math.random() * 5);
+    }
+
+    // 挖水平走廊
+    for (const hy of hRows) {
+      for (let r = hy; r < hy + 2 && r < H; r++) {
+        for (let c = 2; c < W - 2; c++) {
+          map.grid[r][c] = TILE.CORRIDOR;
+        }
+      }
+    }
+    // 挖垂直走廊
+    for (const vx of vCols) {
+      for (let c = vx; c < vx + 2 && c < W; c++) {
+        for (let r = 2; r < H - 2; r++) {
+          map.grid[r][c] = TILE.CORRIDOR;
+        }
+      }
+    }
+
+    // ---- 2. 房间紧贴走廊旁挖 (天然连通, 无需门洞) ----
+    const placedRooms = [];
+    const roomCount = 22 + Math.floor(Math.random() * 8); // 22-29 个房间
+
+    // 候选走廊边: 所有走廊 tile 的上下左右紧邻格
+    const corridorEdges = [];
+    const isCorridor = (c, r) => r >= 0 && r < H && c >= 0 && c < W && map.grid[r][c] === TILE.CORRIDOR;
+
+    for (let r = 0; r < H; r++) {
+      for (let c = 0; c < W; c++) {
+        if (!isCorridor(c, r)) continue;
+        // 该走廊格的四个紧邻格 (非走廊非房间的墙)
+        const nb = [
+          [c, r - 1], [c, r + 1], [c - 1, r], [c + 1, r],
+        ];
+        for (const [nc, nr] of nb) {
+          if (nc >= 1 && nr >= 1 && nc < W - 1 && nr < H - 1 && map.grid[nr][nc] === TILE.WALL) {
+            corridorEdges.push({ col: nc, row: nr });
           }
         }
       }
-      placedRooms.push(room);
     }
 
-    for (let i = 0; i < placedRooms.length - 1; i++) {
-      this._carveCorridor(map, placedRooms[i], placedRooms[i + 1]);
+    // 打乱候选
+    const shuffled = corridorEdges.sort(() => Math.random() - 0.5);
+    let placed = 0;
+    for (let i = 0; i < shuffled.length && placed < roomCount; i++) {
+      const seed = shuffled[i];
+      const sc = seed.col, sr = seed.row;
+
+      // 确定房间扩展方向: 房间向"远离走廊"方向扩展, seed 格保留为门口
+      let dir = null;
+      if (isCorridor(sc, sr - 1)) dir = 'down';       // 走廊在上, 房间向下扩展
+      else if (isCorridor(sc, sr + 1)) dir = 'up';    // 走廊在下, 房间向上扩展
+      else if (isCorridor(sc - 1, sr)) dir = 'right'; // 走廊在左, 房间向右扩展
+      else if (isCorridor(sc + 1, sr)) dir = 'left';  // 走廊在右, 房间向左扩展
+      if (!dir) continue;
+
+      const rw = 4 + Math.floor(Math.random() * 4); // 4-7
+      const rh = 3 + Math.floor(Math.random() * 3); // 3-5
+
+      // 房间矩形: 贴走廊边界
+      let rx, ry;
+      if (dir === 'up') { ry = sr - rh + 1; rx = sc - Math.floor(rw / 2); }
+      else if (dir === 'down') { ry = sr; rx = sc - Math.floor(rw / 2); }
+      else if (dir === 'left') { rx = sc - rw + 1; ry = sr - Math.floor(rh / 2); }
+      else { rx = sc; ry = sr - Math.floor(rh / 2); }
+
+      // 越界检查
+      if (rx < 2 || ry < 2 || rx + rw > W - 2 || ry + rh > H - 2) continue;
+      // 与其他房间重叠检查
+      let overlap = false;
+      for (const pr of placedRooms) {
+        if (rx < pr.x + pr.w && rx + rw > pr.x && ry < pr.y + pr.h && ry + rh > pr.y) {
+          overlap = true;
+          break;
+        }
+      }
+      // 房间覆盖走廊检查 (房间不应盖住另一条走廊, 除非是门洞处)
+      let coversCorridor = false;
+      for (let rr = ry; rr < ry + rh; rr++) {
+        for (let cc = rx; cc < rx + rw; cc++) {
+          // 房间主体应落在墙区; 允许贴走廊那一边
+          if (isCorridor(cc, rr)) { coversCorridor = true; break; }
+        }
+        if (coversCorridor) break;
+      }
+      // 房间主体不应含走廊 (除了贴边那格由门洞保证)
+      if (overlap || coversCorridor) continue;
+
+      // 挖房间 (保留贴走廊边为 ROOM_FLOOR, 与走廊相邻即开门)
+      for (let rr = ry; rr < ry + rh; rr++) {
+        for (let cc = rx; cc < rx + rw; cc++) {
+          if (map.grid[rr][cc] === TILE.WALL) map.grid[rr][cc] = TILE.ROOM_FLOOR;
+        }
+      }
+      placedRooms.push({ x: rx, y: ry, w: rw, h: rh });
+      placed++;
     }
-    if (placedRooms.length > 3) {
-      this._carveCorridor(map, placedRooms[0], placedRooms[placedRooms.length - 1]);
-    }
+
     map.rooms.push(...placedRooms);
 
-    // 传送点槽位: 随机房间中心
-    // EZ 需要 3 个 (SZ-EZ / EZ-LCZ / EZ-HCZ), HCZ/LCZ 各 2 个
-    const centers = [];
-    for (const room of placedRooms) {
-      centers.push({ col: Math.floor(room.x + room.w / 2), row: Math.floor(room.y + room.h / 2) });
+    // ---- 3. 传送点槽位: 选路口的走廊交叉处 (远离房间) ----
+    const candidates = [];
+    for (const vx of vCols) {
+      for (const hy of hRows) {
+        const cx = vx + 1, cy = hy + 1;
+        if (cx > 2 && cx < W - 2 && cy > 2 && cy < H - 2) {
+          candidates.push({ col: cx, row: cy });
+        }
+      }
     }
-    const shuffled = centers.sort(() => Math.random() - 0.5);
+    const shuffled2 = candidates.sort(() => Math.random() - 0.5);
     const slots = [];
-    for (const s of shuffled) {
+    for (const s of shuffled2) {
       if (slots.length >= 3) break;
       let tooClose = false;
       for (const t of slots) {
-        if (Math.abs(s.col - t.col) + Math.abs(s.row - t.row) < 10) { tooClose = true; break; }
+        if (Math.abs(s.col - t.col) + Math.abs(s.row - t.row) < 14) { tooClose = true; break; }
       }
       if (!tooClose) slots.push(s);
     }
-    // 若房间不够 3 个中心, 用随机 walkable 点补充
-    let i = slots.length;
-    while (slots.length < 3 && i < 40) {
+    let guard = 0;
+    while (slots.length < 3 && guard < 60) {
+      guard++;
       const t = map.getRandomWalkableTile(null);
       if (!t) break;
       let tooClose = false;
       for (const s of slots) {
-        if (Math.abs(s.col - t.col) + Math.abs(s.row - t.row) < 10) { tooClose = true; break; }
+        if (Math.abs(s.col - t.col) + Math.abs(s.row - t.row) < 14) { tooClose = true; break; }
       }
       if (!tooClose) slots.push(t);
-      i++;
     }
+
     for (let idx = 0; idx < slots.length; idx++) {
       const s = slots[idx];
-      // 挖一个传送厅
       for (let r = s.row - 1; r <= s.row + 1; r++) {
         for (let c = s.col - 1; c <= s.col + 1; c++) {
           if (r >= 0 && r < map.rows && c >= 0 && c < map.cols && map.grid[r][c] === TILE.WALL) {
@@ -316,10 +415,17 @@ class MapGenerator {
     // 出生点
     if (levelId === 'SZ') {
       // 地表出生: 直升机停机坪旁
-      map.spawnPoints[zone] = { col: 4, row: 4 };
-      map.grid[4][4] = TILE.SPAWN;
+      map.spawnPoints[zone] = { col: 5, row: 5 };
+      map.grid[5][5] = TILE.SPAWN;
     } else {
-      const tile = map.getRandomWalkableTile(zone);
+      // 随机出生: 找离传送点远的可通行 tile
+      let tile = null;
+      if (map.portalSlots.length > 0) {
+        const p0 = map.portalSlots[0];
+        const pPos = map.tileToWorld(p0.col, p0.row);
+        tile = map.getRandomWalkableTileFar(pPos, CONFIG.TILE_SIZE * 12);
+      }
+      if (!tile) tile = map.getRandomWalkableTile(zone);
       if (tile) {
         map.spawnPoints[zone] = tile;
         map.grid[tile.row][tile.col] = TILE.SPAWN;
@@ -329,8 +435,8 @@ class MapGenerator {
     // 出口: 仅地表区有 (逃离点, 停机坪或大门)
     if (levelId === 'SZ') {
       const exitTile = map.getRandomWalkableTileFar(
-        { x: CONFIG.TILE_SIZE * 4, y: CONFIG.TILE_SIZE * 4 },
-        CONFIG.TILE_SIZE * 14
+        { x: CONFIG.TILE_SIZE * 5, y: CONFIG.TILE_SIZE * 5 },
+        CONFIG.TILE_SIZE * 16
       );
       if (exitTile) {
         map.exitPoints[zone] = exitTile;
