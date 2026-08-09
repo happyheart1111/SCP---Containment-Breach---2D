@@ -32,14 +32,20 @@ const mockGame = {
   get player() { return null; },
 };
 
-// ============ 测试1: SCP-173 眨眼机制 ============
-{
+// 隔离辅助: 清空初始 NPC, 只保留手动生成的实体
+function isolateWorld() {
   const world = new GameWorld().generate();
   const perception = new PerceptionSystem();
   const combat = new CombatSystem();
   const ai = new AISystem(world, combat, perception);
   const items = new ItemSystem(world); world.items = items;
-  ai.initialize();
+  // 不调用 ai.initialize() (无初始 NPC), 手动生成
+  return { world, perception, combat, ai, items };
+}
+
+// ============ 测试1: SCP-173 眨眼机制 ============
+{
+  const { world, perception, combat, ai, items } = isolateWorld();
 
   // 生成一个 173 和一个人
   const scp = ai.spawnNPC('scp_173', 'HCZ');
@@ -186,6 +192,145 @@ const mockGame = {
   }
   console.log('测试4 SCP-173 注视冻结:');
   console.log('  被注视时冻结:', frozen ? 'PASS(有冻结状态)' : 'FAIL', '| 眨眼期间移动:', blinkMoved ? 'PASS' : 'FAIL');
+}
+
+// ============ 测试5: SCP-173 实际攻击 (击杀人类) ============
+{
+  const { world, perception, combat, ai, items } = isolateWorld();
+  const scp = ai.spawnNPC('scp_173', 'LCZ');
+  const human = ai.spawnNPC('dclass', 'LCZ');
+  human.pos.x = scp.pos.x + 30; human.pos.y = scp.pos.y;
+  human.facing = 0;
+  const map = world.getLevel('LCZ');
+  const t0 = map.worldToTile(scp.pos.x, scp.pos.y);
+  for (let r = t0.row - 2; r <= t0.row + 2; r++) for (let c = t0.col - 3; c <= t0.col + 3; c++) {
+    if (r >= 0 && r < map.rows && c >= 0 && c < map.cols) map.grid[r][c] = get('TILE').CORRIDOR;
+  }
+  let dead = false;
+  for (let i = 0; i < 60 * 6; i++) {
+    ai.update(1/60, mockGame);
+    items.update(1/60);
+    if (human.dead) { dead = true; break; }
+  }
+  console.log('测试5 SCP-173 攻击人类:', dead ? 'PASS (击杀成功)' : 'FAIL (未击杀)');
+}
+
+// ============ 测试6: SCP-049 实际攻击 (击杀) ============
+{
+  const { world, perception, combat, ai, items } = isolateWorld();
+  const scp = ai.spawnNPC('scp_049', 'EZ');
+  const human = ai.spawnNPC('guard', 'EZ');
+  human.pos.x = scp.pos.x + 15; human.pos.y = scp.pos.y;
+  human.facing = 0;
+  human._behaviorGuard = () => {};
+  let dead = false;
+  for (let i = 0; i < 60 * 3; i++) {
+    ai.update(1/60, mockGame);
+    items.update(1/60);
+    if (human.dead) { dead = true; break; }
+  }
+  console.log('测试6 SCP-049 攻击人类:', dead ? 'PASS (击杀成功)' : 'FAIL (未击杀)');
+}
+
+// ============ 测试7: SCP-939 实际攻击 (感知扑击) ============
+{
+  const { world, perception, combat, ai, items } = isolateWorld();
+  const scp = ai.spawnNPC('scp_939', 'EZ');
+  const human = ai.spawnNPC('guard', 'EZ');
+  human.pos.x = scp.pos.x + 60; human.pos.y = scp.pos.y;
+  human.facing = 0;
+  human._behaviorGuard = () => {};
+  // 清空周围墙 (保证 939 接近路径通畅)
+  const map = world.getLevel('EZ');
+  const t0 = map.worldToTile(scp.pos.x, scp.pos.y);
+  for (let r = t0.row - 3; r <= t0.row + 3; r++) for (let c = t0.col - 5; c <= t0.col + 5; c++) {
+    if (r >= 0 && r < map.rows && c >= 0 && c < map.cols) map.grid[r][c] = get('TILE').CORRIDOR;
+  }
+  let dead = false;
+  for (let i = 0; i < 60 * 6; i++) {
+    ai.update(1/60, mockGame);
+    items.update(1/60);
+    if (human.dead) { dead = true; break; }
+  }
+  console.log('测试7 SCP-939 攻击人类:', dead ? 'PASS (扑杀成功)' : 'FAIL (未扑杀)');
+}
+
+// ============ 测试8: 玩家 SCP-173 接触秒杀 ============
+{
+  const world = new GameWorld().generate();
+  const perception = new PerceptionSystem();
+  const combat = new CombatSystem();
+  const ai = new AISystem(world, combat, perception);
+  const items = new ItemSystem(world); world.items = items;
+  ai.initialize();
+  const human = ai.spawnNPC('guard', 'LCZ');
+  const Player = get('Player');
+  const player = new Player('scp173', new Vec2(human.pos.x + 20, human.pos.y), 'LCZ');
+  player.input = { keys: { KeyW: false, KeyS: false, KeyA: false, KeyD: false }, mouseDown: false };
+  player.mouseWorld = human.pos.clone();
+  sandbox.testPlayer = player;
+  ai.entities.push(player);
+  const ctx = ai.ctxFor(player, mockGame);
+  ctx.items = items;
+  let killed = false;
+  for (let i = 0; i < 60 * 2; i++) {
+    ai.update(1/60, mockGame);
+    items.update(1/60);
+    player.update(1/60, ctx);
+    if (human.dead) { killed = true; break; }
+  }
+  console.log('测试8 玩家173 接触秒杀:', killed ? 'PASS (秒杀成功)' : 'FAIL (未击杀)');
+}
+
+// ============ 测试9: 玩家173 "见证"瞬移技能 (Shift) ============
+{
+  const world = new GameWorld().generate();
+  const perception = new PerceptionSystem();
+  const combat = new CombatSystem();
+  const ai = new AISystem(world, combat, perception);
+  const items = new ItemSystem(world); world.items = items;
+  ai.initialize();
+  // 在 EZ 生成 (无初始SCP干扰)
+  const human = ai.spawnNPC('guard', 'EZ');
+  const Player = get('Player');
+  const player = new Player('scp173', new Vec2(human.pos.x + 200, human.pos.y), 'EZ');
+  player.input = { keys: { KeyW: false, KeyS: false, KeyA: false, KeyD: false, ShiftLeft: true }, mouseDown: false };
+  player.mouseWorld = human.pos.clone();
+  sandbox.testPlayer = player;
+  ai.entities.push(player);
+  const ctx = ai.ctxFor(player, mockGame);
+  ctx.items = items;
+  let killed = false;
+  for (let i = 0; i < 60 * 2; i++) {
+    ai.update(1/60, mockGame);
+    items.update(1/60);
+    player.update(1/60, ctx);
+    if (human.dead) { killed = true; break; }
+  }
+  console.log('测试9 玩家173 见证瞬移:', killed ? 'PASS (200px外瞬移秒杀)' : 'FAIL (未触发)');
+}
+
+// ============ 测试10: 玩家173 左键斩击 (SCP:SL) ============
+{
+  const { world, perception, combat, ai, items } = isolateWorld();
+  const human = ai.spawnNPC('guard', 'LCZ');
+  const Player = get('Player');
+  const player = new Player('scp173', new Vec2(human.pos.x + 40, human.pos.y), 'LCZ');
+  player.input = { keys: { KeyW: false, KeyS: false, KeyA: false, KeyD: false }, mouseDown: true };
+  player.mouseWorld = human.pos.clone(); // 面向人类
+  player.facing = Vec2.angle(player.pos, human.pos);
+  sandbox.testPlayer = player;
+  ai.entities.push(player);
+  const ctx = ai.ctxFor(player, mockGame);
+  ctx.items = items;
+  let killed = false;
+  for (let i = 0; i < 60 * 2; i++) {
+    ai.update(1/60, mockGame);
+    items.update(1/60);
+    player.update(1/60, ctx);
+    if (human.dead) { killed = true; break; }
+  }
+  console.log('测试10 玩家173 左键斩击:', killed ? 'PASS (40px内斩杀)' : 'FAIL (未斩杀)');
 }
 
 console.log('SCP AI 行为测试完成');

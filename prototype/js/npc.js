@@ -220,23 +220,36 @@ class NPC {
     const vision = PerceptionSystem.checkVision(this, visibleTargets, ctx.map);
     const hearing = PerceptionSystem.checkHearing(this, ctx.perception.noiseEvents);
 
-    if (vision) {
-      if (this.lastSeenTarget && this.lastSeenTarget.entity === vision.entity) {
+    // SCP-939 特殊感知 (SCP:SL设定): 无视觉, 但能感知极近猎物 (150px内)
+    let nearPrey = null;
+    let nearDist = Infinity;
+    if (this.isSoundHunter) {
+      for (const e of visibleTargets) {
+        if (e.faction === 'SCP' || e.faction === 'ZOMBIE' || e.faction === 'WILD') continue;
+        const d = Vec2.dist(this.pos, e.pos);
+        if (d < 150 && d < nearDist) { nearDist = d; nearPrey = e; }
+      }
+    }
+
+    if (vision || nearPrey) {
+      const target = vision ? vision.entity : nearPrey;
+      const tdist = vision ? vision.dist : nearDist;
+      if (this.lastSeenTarget && this.lastSeenTarget.entity === target) {
         this.identifyTimer += dt;
-        this.lastSeenTarget.pos = vision.entity.pos.clone();
+        this.lastSeenTarget.pos = target.pos.clone();
         this.lastSeenTarget.time = ctx.gameTime;
-        this.lastSeenTarget.dist = vision.dist;
+        this.lastSeenTarget.dist = tdist;
         if (this.identifyTimer >= CONFIG.IDENTIFY_TIME) {
-          this.identifiedTarget = vision.entity;
+          this.identifiedTarget = target;
         }
       } else {
         this.identifyTimer = 0;
         this.identifiedTarget = null;
         this.lastSeenTarget = {
-          entity: vision.entity,
-          pos: vision.entity.pos.clone(),
+          entity: target,
+          pos: target.pos.clone(),
           time: ctx.gameTime,
-          dist: vision.dist,
+          dist: tdist,
         };
       }
     } else {
@@ -370,7 +383,10 @@ class NPC {
     }
 
     this.facing = Vec2.angle(this.pos, target.pos);
-    const stillVisible = !PerceptionSystem._lineBlocked(this.pos, target.pos, ctx.map) && dist < this.visionRange;
+    // 声音猎手(939)无视觉: 锁定目标后始终视为可见 (SCP:SL设定)
+    const stillVisible = this.isSoundHunter
+      ? true
+      : (!PerceptionSystem._lineBlocked(this.pos, target.pos, ctx.map) && dist < this.visionRange);
 
     if (stillVisible) {
       this.lastSeenTarget = { entity: target, pos: target.pos.clone(), time: ctx.gameTime, dist };
@@ -549,7 +565,7 @@ class NPC {
   // - 目标优先级: 优先猎杀武装目标 (威胁更大)
   // - 近距离直线扑杀, 远距离A*绕行
   // ============================================================
-  _behaviorSCP173(dt, ctx) {
+  _behaviorSCP173(dt, ctx, engageTarget) {
     // 眨眼计时 (SCP原设定: 周期眨眼, 眨眼瞬间无视注视)
     this.blinkTimer -= dt;
     if (this.blinking) {
@@ -571,20 +587,25 @@ class NPC {
       this.speed = 0;
     } else {
       this.speed = 210;
-      // 目标选择: 优先武装人类 (MTF/守卫/CI/GOC), 其次平民
+      // 目标选择: 优先交战目标, 否则武装人类, 否则最近
       let best = null;
       let bestScore = -Infinity;
-      for (const e of ctx.world.entities) {
-        if (e === this || e.dead || e.isSCP) continue;
-        const d = Vec2.dist(this.pos, e.pos);
-        let score = 0;
-        // 距离权重
-        score += Math.max(0, 400 - d);
-        // 武装目标权重 (有武器威胁大, 优先猎杀)
-        if (e.weapon && WEAPONS[e.weapon] && !WEAPONS[e.weapon].melee) score += 300;
-        // 正在交战的目标权重低 (可能在被队友打)
-        if (e.fsm && e.fsm.state === 'engage') score -= 150;
-        if (score > bestScore) { bestScore = score; best = e; }
+      if (engageTarget && !engageTarget.dead && engageTarget.levelId === this.levelId) {
+        best = engageTarget;
+        bestScore = Infinity;
+      } else {
+        for (const e of ctx.world.entities) {
+          if (e === this || e.dead || e.isSCP) continue;
+          const d = Vec2.dist(this.pos, e.pos);
+          let score = 0;
+          // 距离权重
+          score += Math.max(0, 400 - d);
+          // 武装目标权重 (有武器威胁大, 优先猎杀)
+          if (e.weapon && WEAPONS[e.weapon] && !WEAPONS[e.weapon].melee) score += 300;
+          // 正在交战的目标权重低 (可能在被队友打)
+          if (e.fsm && e.fsm.state === 'engage') score -= 150;
+          if (score > bestScore) { bestScore = score; best = e; }
+        }
       }
 
       if (best) {
@@ -613,18 +634,23 @@ class NPC {
   // - 目标选择: 优先无武器平民 (更容易杀死并复活)
   // - 已有僵尸随行时: 专注找新目标扩展军团
   // ============================================================
-  _behaviorSCP049(dt, ctx) {
+  _behaviorSCP049(dt, ctx, engageTarget) {
     let best = null;
     let bestScore = -Infinity;
-    for (const e of ctx.world.entities) {
-      if (e === this || e.dead || e.isSCP) continue;
-      const d = Vec2.dist(this.pos, e.pos);
-      let score = Math.max(0, 500 - d);
-      // 无武器平民优先 (制造僵尸)
-      if (!e.weapon || !WEAPONS[e.weapon]) score += 200;
-      // 已被僵尸纠缠的目标降低 (避免抢怪)
-      if (e.fsm && e.fsm.state === 'engage') score -= 100;
-      if (score > bestScore) { bestScore = score; best = e; }
+    if (engageTarget && !engageTarget.dead && engageTarget.levelId === this.levelId) {
+      best = engageTarget;
+      bestScore = Infinity;
+    } else {
+      for (const e of ctx.world.entities) {
+        if (e === this || e.dead || e.isSCP) continue;
+        const d = Vec2.dist(this.pos, e.pos);
+        let score = Math.max(0, 500 - d);
+        // 无武器平民优先 (制造僵尸)
+        if (!e.weapon || !WEAPONS[e.weapon]) score += 200;
+        // 已被僵尸纠缠的目标降低 (避免抢怪)
+        if (e.fsm && e.fsm.state === 'engage') score -= 100;
+        if (score > bestScore) { bestScore = score; best = e; }
+      }
     }
 
     if (best) {
@@ -632,6 +658,8 @@ class NPC {
       if (best.levelId !== this.levelId) {
         this.patrolZone = best.levelId;
       } else if (dist < 450) {
+        // 锁定目标: 近距离冲刺扑杀 (SCP:SL 049 冲撞)
+        this.speed = dist < 250 ? 130 : 55;
         this._moveTowardsPath(best.pos, dt, ctx);
         if (dist < this.radius + best.radius + 5) {
           ctx.combat.dealDamage(best, 9999, this, 'touch_plague', ctx);
@@ -651,21 +679,23 @@ class NPC {
   // ============================================================
   // SCP-939: 声音猎手伏击 (SCP:SL原设定)
   // 潜行靠近声音源 → 静止等待 → 猎物接近时扑击
+  // 参考 SCP:SL: 939 无视觉, 靠声音定位 + 极近猎物感知
   // ============================================================
   _behaviorAmbush(dt, ctx) {
-    // 附近可扑击猎物?
+    // 附近可扑击猎物? (感知范围, 无论有无声音)
     let prey = null;
     let preyDist = Infinity;
     for (const e of ctx.allEntities) {
       if (e === this || e.dead || e.faction === 'SCP' || e.faction === 'WILD' || e.faction === 'ZOMBIE') continue;
       const d = Vec2.dist(this.pos, e.pos);
-      if (d < 90 && d < preyDist) { preyDist = d; prey = e; }
+      // 感知范围: 120 (极近猎物凭感知发现, SCP:SL设定)
+      if (d < 120 && d < preyDist) { preyDist = d; prey = e; }
     }
 
-    // 有猎物在扑击范围: 扑击
+    // 有猎物在感知范围: 扑击/追击
     if (prey) {
-      this.speed = 90;
-      this._moveTowards(prey.pos, dt, ctx);
+      this.speed = 95;
+      this._moveTowardsPath(prey.pos, dt, ctx);
       if (preyDist < this.radius + prey.radius + 8) {
         ctx.combat.dealDamage(prey, 120, this, 'pounce', ctx);
         this.attackAnimTimer = 0.5;
@@ -729,8 +759,8 @@ class NPC {
   }
 
   _scpCombatBehavior(dt, ctx, target, dist) {
-    if (this.typeId === 'scp_173') { this._behaviorSCP173(dt, ctx); return; }
-    if (this.typeId === 'scp_049') { this._behaviorSCP049(dt, ctx); return; }
+    if (this.typeId === 'scp_173') { this._behaviorSCP173(dt, ctx, target); return; }
+    if (this.typeId === 'scp_049') { this._behaviorSCP049(dt, ctx, target); return; }
     if (this.typeId === 'scp_939') { this._behaviorAmbush(dt, ctx); return; }
   }
 

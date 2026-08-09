@@ -625,8 +625,18 @@ class Game {
           watchWarn.textContent = this.player.watched ? '⚠ 被注视 — 冻结!' : '';
           watchWarn.style.color = '#ff3344';
         }
+        // 见证技能冷却提示 (Shift)
+        const cd = Math.ceil(this.player.witnessCooldown || 0);
+        const cdEl = el('player-witness-hint');
+        if (cdEl) {
+          cdEl.classList.remove('hidden');
+          cdEl.textContent = cd > 0 ? `见证技能: Shift (冷却 ${cd}s)` : '见证技能: Shift 就绪!';
+          cdEl.style.color = cd > 0 ? '#888' : '#ffcc00';
+        }
       } else {
         watchWarn.classList.add('hidden');
+        const cdEl = el('player-witness-hint');
+        if (cdEl) cdEl.classList.add('hidden');
       }
 
       this._renderMissionPanel();

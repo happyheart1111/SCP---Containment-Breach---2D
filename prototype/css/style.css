@@ -511,6 +511,14 @@ body {
   text-align: center;
 }
 
+.witness-hint {
+  color: #ffcc00;
+  font-weight: bold;
+  font-size: 12px;
+  margin-top: 4px;
+  text-align: center;
+}
+
 @keyframes pulse {
   from { opacity: 0.5; }
   to { opacity: 1; }

@@ -45,6 +45,8 @@ class Player {
     this.watched = false;
     this.blinkCooldown = 0;
     this.killCount = 0;
+    this.lungeCooldown = 0;
+    this.witnessCooldown = 0;
 
     this.containedCount = 0;
     this.recruited = false;
@@ -136,6 +138,8 @@ class Player {
     this.flashTimer = Math.max(0, this.flashTimer - dt);
     this.blinkCooldown -= dt;
     this.teleportCooldown = Math.max(0, this.teleportCooldown - dt);
+    this.lungeCooldown = Math.max(0, (this.lungeCooldown || 0) - dt);
+    this.witnessCooldown = Math.max(0, (this.witnessCooldown || 0) - dt);
 
     // 增益更新
     this._updateBuffs(dt);
@@ -342,11 +346,64 @@ class Player {
       this._handleMovement(dt, ctx);
     }
 
+    // "见证"技能 (SCP:SL): Shift 冷却后传送到最近人类身边秒杀
+    if (this.input.keys['ShiftLeft'] || this.input.keys['ShiftRight']) {
+      if (this.witnessCooldown <= 0) {
+        let nearest = null;
+        let nearestDist = Infinity;
+        for (const e of ctx.allEntities) {
+          if (e === this || e.dead || e.isSCP) continue;
+          if (!isHostile(this.faction, e.faction)) continue;
+          const d = Vec2.dist(this.pos, e.pos);
+          if (d < 500 && d < nearestDist) { nearestDist = d; nearest = e; }
+        }
+        if (nearest) {
+          // 传送至目标身后并秒杀
+          this.pos = new Vec2(nearest.pos.x + nearest.radius + 5, nearest.pos.y + nearest.radius + 5);
+          ctx.combat.dealDamage(nearest, 9999, this, 'touch_kill', ctx);
+          this.killCount++;
+          ctx.game.onPlayerKill(nearest);
+          this.witnessCooldown = 8; // 8秒冷却
+          ctx.game.logEvent('见证: 瞬移到目标身后!', 'spawn');
+          this.attackAnimTimer = 0.4;
+        } else {
+          ctx.game.logEvent('见证技能: 附近没有可猎杀目标 (500px内)', 'info');
+          this.witnessCooldown = 2; // 短暂冷却防刷
+        }
+      }
+    }
+
+    // 左键斩击 (SCP:SL: 未被注视时左键直接杀死近处人类)
+    if (this.input.mouseDown && !this.watched && this.lungeCooldown <= 0) {
+      // 找鼠标朝向 60px 内的最近人类
+      let target = null;
+      let targetScore = -Infinity;
+      for (const e of ctx.allEntities) {
+        if (e === this || e.dead || e.isSCP) continue;
+        if (!isHostile(this.faction, e.faction)) continue;
+        const d = Vec2.dist(this.pos, e.pos);
+        if (d > 60) continue;
+        // 朝向角度
+        const angleTo = Vec2.angle(this.pos, e.pos);
+        const diff = Math.abs(Vec2.angleDiff2(this.facing, angleTo));
+        if (diff > Math.PI / 2) continue; // 只能杀面向方向
+        const score = 60 - d;
+        if (score > targetScore) { targetScore = score; target = e; }
+      }
+      if (target) {
+        ctx.combat.dealDamage(target, 9999, this, 'touch_kill', ctx);
+        this.killCount++;
+        ctx.game.onPlayerKill(target);
+        this.lungeCooldown = 0.5; // 短暂冷却防连点
+      }
+    }
+
+    // 接触即杀 (放宽到 30px, SCP:CB 扭断脖子范围)
     for (const e of ctx.allEntities) {
       if (e === this || e.dead || e.isSCP) continue;
       if (!isHostile(this.faction, e.faction)) continue;
       const d = Vec2.dist(this.pos, e.pos);
-      if (d < this.radius + e.radius + 4) {
+      if (d < this.radius + e.radius + 10) {
         ctx.combat.dealDamage(e, 9999, this, 'touch_kill', ctx);
         this.killCount++;
         ctx.game.onPlayerKill(e);
