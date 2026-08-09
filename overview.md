@@ -1,13 +1,14 @@
 # SCP 收容失效 HTML 版 — 概览
 
-> **版本**: v0.6 | **日期**: 2026-08-08 | **状态**: 六角色可玩 + 选角bug修复
+> **版本**: v1.0.0 | **日期**: 2026-08-09 | **状态**: 四区域多地图版 + 全任务完成
 
 ## 产出文件
 
 - `GDD_SCP_Containment_Breach_HTML.md` — 完整游戏设计文档 v0.3 (含第11节角色任务体系 v0.4)
-- `prototype/` — AI NPC 仿真原型 (15个JS模块 + HTML + CSS + server.js)
+- `prototype/` — 多地图 AI NPC 仿真原型 (17个JS模块 + HTML + CSS + server.js + build.js)
 - `prototype/index.html` — 原型入口 (localhost:8080)
-- `prototype/tests/` — headless 逻辑测试脚本 (4套含jsdom)
+- `prototype/dist/index.html` — 压缩版 (单文件部署, 148KB)
+- `prototype/tests/` — headless 逻辑测试脚本 (6套含 jsdom/连通性/跨图/压缩版)
 
 ## 核心设计
 
@@ -104,6 +105,50 @@
 | GOC | 能量武器摧毁2个SCP | 窃取SCP样本 | 不被MTF攻击撤离 | SZ |
 | CI | 击杀3名基金会+接应2名D级 | 接应D级 | 利用SCP分散注意力 | SZ |
 | SCP-173 | 击杀5名人类 | 优先猎杀武装目标 | 核弹中存活 | HCZ |
+
+## v1.0.0 四区域多地图版 (2026-08-09)
+
+### 任务清单 (8.8任务全部完成)
+
+| # | 任务 | 状态 | 关键实现 |
+|---|------|------|----------|
+| 1 | 修复开始界面点击无反应 | ✅ | 根因: index.html 缺 `facilities.js` 脚本引用 → `new Game()` 抛 `FacilitySystem is not defined` → 整个游戏未初始化 → 按钮无响应; 另加强 `_initUI` 健壮性(每按钮独立 bind) |
+| 2 | 鼠标控制方向, WASD 仅移动 | ✅ | 所有角色 `facing = Vec2.angle(pos, mouseWorld)` 每帧; `_handleMovement` 移除方向设置 |
+| 3 | 多地图设施 (地表/办公/重收容/轻收容) | ✅ | 4 张独立地图(SZ 固定, EZ/HCZ/LCZ 随机 BSP), 8 传送点 (检查点+电梯), SCP:SL 拓扑 (SZ↔EZ↔LCZ, EZ↔HCZ, HCZ↔LCZ) |
+| 4 | 物品刷新系统 | ✅ | 40 刷新点, 6 类物品 (medkit/ammo/keycard/SCP/weapon), 45秒重刷, 玩家自动拾取 |
+| 5 | SCP 物品 (SCP-500 万能药等) | ✅ | SCP-500/207/268/714/127, 物品栏 + 数字键使用 (1-6) |
+| 6 | 文件分配与压缩 | ✅ | `build.js` 合并去注释 → `dist/scp-cb-1.0.0.min.{js,css,html}`, 节省 22% (192KB → 149KB) |
+| 7 | 检查bug输出v1.0.0 | ✅ | 6 套测试全绿 + 截图验证 (Edge headless) |
+
+### 多地图架构 (任务3 核心)
+
+- `js/world.js` — GameWorld 管理 4 张地图、传送点、每地图 pathfinder/facilities
+- `js/mapsystem.js` — 单图生成: SZ 固定布局 (建筑/停机坪/出口), EZ/HCZ/LCZ 随机 BSP
+- 实体带 `levelId`; AI 感知/交互/寻路仅同图; 跨图传送通过 `nextPortalFor(levelId, targetLevelId)` BFS 路径
+- NPC 跨图移动用 A* 寻路 (避免被墙卡住)
+- D级无卡 → LCZ→EZ 电梯可过 → EZ→SZ 检查点挡住 (符合 SCP:SL 设定)
+- 科学家 Lv.2 → 全通过
+- MTF/CI 主动跨图: 从 SZ 向 HCZ/LCZ 推进
+- SCP 全向卡 → 全图自由追踪人类
+
+### 物品系统 (任务4/5)
+
+- `js/itemsystem.js` — ItemSystem: 刷新点初始化 + 周期刷新 + 拾取/使用
+- 物品类型: SCP-500 (满血) / SCP-207 (加速掉血) / SCP-268 (15秒隐身) / SCP-714 (减伤) / SCP-127 (无限弹手枪) / 钥匙卡 / 弹药 / 武器
+- 物品栏最多 6 格, 数字键 1-6 使用
+- 武器拾取替换当前武器; 弹药需对应武器
+
+### 测试套件
+
+| 测试 | 覆盖内容 | 结果 |
+|------|----------|------|
+| `test_jsdom.js` | DOM 集成 + 6角色 + 按钮点击 + 60帧循环 + 传送 + 物品拾取 | OK |
+| `test_headless.js` | 世界生成 + AI 120秒模拟 + 6玩家 30秒模拟 + 跨图校验 + A* | OK |
+| `test_interaction.js` | SCP-173 秒杀 / D级转职 / 阵营关系 | OK |
+| `test_facilities.js` | 门禁/914/特斯拉生成 + 钥匙卡逻辑 + Very Fine 概率 | OK |
+| `test_crosslevel.js` | 25 分钟跨图追踪: D级 LCZ→EZ / 科学家 LCZ→SZ | OK |
+| `test_connectivity.js` | 5 次随机生成验证: 每地图所有 tile + 出口 + 传送点全可达 | OK |
+| `test_dist.js` | 压缩版冒烟测试 | OK |
 
 ## v0.6 六角色可玩化 + bug修复
 

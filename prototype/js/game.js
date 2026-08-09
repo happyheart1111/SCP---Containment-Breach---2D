@@ -1,5 +1,5 @@
 // ============================================================
-// game.js — 主游戏循环 + 状态机 + 输入 + HUD
+// game.js — 主游戏循环 + 状态机 + 输入 + HUD (v1.0.0 多地图版)
 // 状态: menu → playing → gameover
 // ============================================================
 
@@ -24,10 +24,9 @@ class Game {
     // 玩家引用 (由角色选择创建)
     this.player = null;
 
-    // 摄像头
     this.cameraFollow = false;
 
-    this._initSystems();
+    this._initWorld();
     this._initUI();
     this._initInput();
 
@@ -35,41 +34,29 @@ class Game {
     requestAnimationFrame(this._loop);
   }
 
-  _initSystems() {
-    // 地图
-    this.map = MapGenerator.generate();
-    // 寻路器 (AI用)
-    this.pathfinder = new Pathfinder(
-      this._buildPathfindingGrid(),
-      CONFIG.MAP_COLS, CONFIG.MAP_ROWS
-    );
-    // 感知
-    this.perception = new PerceptionSystem(this.map);
-    // 战斗
+  // ============================================================
+  // 世界初始化 (多地图)
+  // ============================================================
+  _initWorld() {
+    this.world = new GameWorld().generate();
+    this.map = this.world.getLevel('LCZ');
+    this.perception = new PerceptionSystem();
     this.combat = new CombatSystem();
-    // AI
-    this.ai = new AISystem(this.map, this.combat, this.perception);
-    // 设施 (钥匙卡门禁/914/特斯拉电门)
-    this.facilities = new FacilitySystem(this.map);
-    // 任务
+    this.ai = new AISystem(this.world, this.combat, this.perception);
+    this.items = new ItemSystem(this.world);
+    this.world.items = this.items;
     this.missions = new MissionSystem(this);
-    // 渲染
-    this.renderer = new Renderer(this.canvas, this.map);
+    this.renderer = new Renderer(this.canvas, this.world);
     this.renderer.game = this;
-
-    // 初始化 AI (观察模式或玩家进入后)
     this.ai.initialize();
   }
 
-  _buildPathfindingGrid() {
-    const grid = [];
-    for (let r = 0; r < this.map.rows; r++) {
-      grid[r] = [];
-      for (let c = 0; c < this.map.cols; c++) {
-        grid[r][c] = this.map.isWalkable(c, r) ? 0 : 1;
-      }
+  // 获取当前地图 (随玩家)
+  get currentMap() {
+    if (this.player) {
+      return this.world.getLevel(this.player.levelId);
     }
-    return grid;
+    return this.world.getLevel(this.world.currentLevelId);
   }
 
   // ============================================================
@@ -78,16 +65,17 @@ class Game {
   startGame(role) {
     this._restartWorld();
 
-    // 出生点 (D级/科学家选安全点, 其余按区域)
-    let spawnZone = 'LCZ';
-    if (role === 'mtf' || role === 'goc' || role === 'ci') spawnZone = 'SZ';
-    if (role === 'scp173') spawnZone = 'HCZ';
+    // 出生地图
+    let spawnLevel = 'LCZ';
+    if (role === 'mtf' || role === 'goc' || role === 'ci') spawnLevel = 'SZ';
+    if (role === 'scp173') spawnLevel = 'HCZ';
 
+    const map = this.world.getLevel(spawnLevel);
     let tile = null;
     if (role === 'dclass' || role === 'scientist') {
-      tile = this._findSafeSpawn(spawnZone);
+      tile = this._findSafeSpawn(spawnLevel);
     } else {
-      tile = this.map.getRandomWalkableTile(spawnZone);
+      tile = map.getRandomWalkableTile(spawnLevel);
     }
     if (!tile) { this.logEvent('找不到出生点!', 'info'); return; }
 
@@ -96,13 +84,18 @@ class Game {
       tile.row * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2
     );
 
-    this.player = new Player(role, spawnPos);
-    this.player.input = this; // 共享输入
+    this.player = new Player(role, spawnPos, spawnLevel);
+    this.player.input = this;
+    this.player.mouseWorld = this.mouseWorld;
+    this.player.game = this;
+    // 初始朝向: 指向玩家右侧 (避免出生时朝向 (0,0))
+    this.mouseWorld.x = spawnPos.x + 100;
+    this.mouseWorld.y = spawnPos.y;
 
-    // 玩家加入AI实体列表 (AI能看到/攻击玩家)
+    // 玩家加入AI实体列表
     this.ai.entities.push(this.player);
 
-    // 任务开始
+    this.world.currentLevelId = spawnLevel;
     this.missions.start(role);
 
     this.state = 'playing';
@@ -117,6 +110,7 @@ class Game {
 
     this.logEvent(`你选择了: ${this._roleName(role)}`, 'spawn');
     this.logEvent(this.missions.stages[0].desc, 'info');
+    this.logEvent(`出生区域: ${LEVEL_NAMES[spawnLevel]}`, 'info');
 
     // 隐藏菜单
     document.getElementById('role-menu').classList.add('hidden');
@@ -130,17 +124,16 @@ class Game {
     }[role] || role;
   }
 
-  // D级出生点: LCZ 中离所有 SCP 最远的可通行 tile
-  _findSafeSpawn(zone) {
-    const scps = this.ai.entities.filter(e => e.isSCP && !e.dead);
+  // D级出生点: 离所有 SCP 最远的可通行 tile
+  _findSafeSpawn(levelId) {
+    const map = this.world.getLevel(levelId);
+    const scps = this.ai.entities.filter(e => e.isSCP && !e.dead && e.levelId === levelId);
     let best = null;
     let bestDist = -1;
 
-    for (let r = 0; r < this.map.rows; r++) {
-      for (let c = 0; c < this.map.cols; c++) {
-        if (!this.map.isWalkable(c, r)) continue;
-        if (this.map.zoneMap[r][c] !== zone) continue;
-
+    for (let r = 0; r < map.rows; r++) {
+      for (let c = 0; c < map.cols; c++) {
+        if (!map.isWalkable(c, r)) continue;
         const wx = c * CONFIG.TILE_SIZE;
         const wy = r * CONFIG.TILE_SIZE;
         let minDist = Infinity;
@@ -158,19 +151,21 @@ class Game {
   }
 
   _restartWorld() {
-    this.map = MapGenerator.generate();
-    this.pathfinder = new Pathfinder(this._buildPathfindingGrid(), CONFIG.MAP_COLS, CONFIG.MAP_ROWS);
-    this.perception = new PerceptionSystem(this.map);
+    this.world = new GameWorld().generate();
+    this.map = this.world.getLevel('LCZ');
+    this.perception = new PerceptionSystem();
     this.combat = new CombatSystem();
-    this.ai = new AISystem(this.map, this.combat, this.perception);
-    this.facilities = new FacilitySystem(this.map);
+    this.ai = new AISystem(this.world, this.combat, this.perception);
+    this.items = new ItemSystem(this.world);
+    this.world.items = this.items;
     this.missions = new MissionSystem(this);
-    this.renderer.setMap(this.map);
+    this.renderer.setWorld(this.world);
+    this.renderer.followTarget = null;
     this.ai.initialize();
   }
 
   // ============================================================
-  // 事件回调 (由 NPC/Player/MissionSystem 调用)
+  // 事件回调
   // ============================================================
   logEvent(text, type = 'info') {
     const log = document.getElementById('event-log');
@@ -187,26 +182,28 @@ class Game {
     log.scrollTop = log.scrollHeight;
   }
 
+  // 玩家跨图传送回调
+  onLevelChange(newLevelId) {
+    this.world.currentLevelId = newLevelId;
+    this.missions.onLevelChanged(newLevelId);
+  }
+
   onNPCDeath(victim, killer) {
-    if (victim === this.player) return; // 玩家死亡走 onPlayerDeath
+    if (victim === this.player) return;
     this.logEvent(`${killer ? killer.name : '未知'} → ${victim.name}`, 'death');
 
-    // MTF 目标: 设施内 SCP 被消灭即计入收容进度
-    // (AI MTF 也会击杀 SCP — 活着的世界里玩家不是唯一演员)
     if (this.player && this.player.role === 'mtf' && victim.isSCP) {
       this.player.containedCount = Math.min(3, this.player.containedCount + 1);
       this.logEvent(`SCP 收容进度: ${this.player.containedCount}/3`, 'info');
       this.perception.emitNoise(victim.pos, 500, 3, victim);
     }
 
-    // GOC 目标: 玩家用能量武器击杀 SCP 计入摧毁数
     if (this.player && this.player.role === 'goc' && victim.isSCP && killer === this.player) {
       this.player.scpKills = Math.min(2, this.player.scpKills + 1);
       this.logEvent(`SCP 摧毁进度: ${this.player.scpKills}/2`, 'info');
       this.perception.emitNoise(victim.pos, 600, 3, victim);
     }
 
-    // CI 目标: 击杀基金会人员 (MTF/守卫/科学家)
     if (this.player && this.player.role === 'ci' && killer === this.player) {
       if (victim.faction === 'FOUNDATION' || victim.faction === 'SCIENTIST') {
         this.player.foundationKills = Math.min(3, this.player.foundationKills + 1);
@@ -214,14 +211,12 @@ class Game {
       }
     }
 
-    // SCP 猎杀计数
     if (this.player && this.player.role === 'scp173' && killer === this.player) {
       this.player.killCount++;
     }
   }
 
   onPlayerKill(victim) {
-    // SCP-173 击杀
     this.player.killCount++;
     this.logEvent(`击杀: ${victim.name} (${this.player.killCount}/5)`, 'death');
   }
@@ -263,7 +258,6 @@ class Game {
     }
     sub.textContent = reason;
 
-    // 统计
     const stats = this.ai.getFactionStats();
     const statLine = document.getElementById('gameover-stats');
     statLine.textContent = `击杀 ${this.player ? this.player.killCount : 0} | SCP收容 ${this.player ? this.player.containedCount : 0}/3 | 设施存活 ${this.ai.getAliveNPCs().length} 单位`;
@@ -275,14 +269,21 @@ class Game {
   // 输入
   // ============================================================
   _initInput() {
-    // 键盘
     window.addEventListener('keydown', (e) => {
       this.keys[e.code] = true;
-      // 回车重新开始 (gameover 时)
+
+      // 数字键使用物品 (1-6)
+      if (this.state === 'playing' && this.player && !this.player.dead) {
+        const numMap = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Digit6: 5 };
+        if (numMap[e.code] !== undefined) {
+          const ctx = this._getCtx();
+          this.player.tryUseInventory(numMap[e.code], ctx);
+        }
+      }
+
       if (this.state === 'gameover' && e.code === 'Enter') {
         this._showMenu();
       }
-      // E 键交互 (开门/914)
       if (e.code === 'KeyE' && this.state === 'playing' && this.player && !this.player.dead) {
         const ctx = this._getCtx();
         this.player.tryInteract(ctx);
@@ -306,78 +307,88 @@ class Game {
       const sy = e.clientY - rect.top;
 
       // 转换到世界坐标 (考虑渲染器的缩放和偏移)
-      const r = this.renderer;
+      const map = this.currentMap;
       const ts = CONFIG.TILE_SIZE;
-      const mapW = CONFIG.MAP_COLS * ts;
-      const mapH = CONFIG.MAP_ROWS * ts;
-      const offX = (r.canvas.width - mapW * r.camera.zoom) / 2;
-      const offY = (r.canvas.height - mapH * r.camera.zoom) / 2;
-      this.mouseWorld.x = (sx - offX) / r.camera.zoom;
-      this.mouseWorld.y = (sy - offY) / r.camera.zoom;
+      const mapW = map.cols * ts;
+      const mapH = map.rows * ts;
+
+      // 跟随模式用 followZoom, 否则用 camera.zoom
+      const r = this.renderer;
+      let zoom, offX, offY;
+      if (this.cameraFollow && this.player && !this.player.dead) {
+        zoom = 1.6;
+        offX = this.canvas.width / 2 - this.player.pos.x * zoom;
+        offY = this.canvas.height / 2 - this.player.pos.y * zoom;
+        offX = Math.min(0, Math.max(this.canvas.width - mapW * zoom, offX));
+        offY = Math.min(0, Math.max(this.canvas.height - mapH * zoom, offY));
+      } else {
+        zoom = r.camera.zoom;
+        offX = (this.canvas.width - mapW * zoom) / 2;
+        offY = (this.canvas.height - mapH * zoom) / 2;
+      }
+
+      this.mouseWorld.x = (sx - offX) / zoom;
+      this.mouseWorld.y = (sy - offY) / zoom;
     });
   }
 
   // ============================================================
-  // UI 初始化
+  // UI 初始化 (健壮版: 单个元素缺失不影响整体)
   // ============================================================
   _initUI() {
+    const bind = (id, fn) => {
+      const el = document.getElementById(id);
+      if (el) el.onclick = fn;
+    };
+
     // 角色选择按钮
-    document.getElementById('btn-role-dclass').onclick = () => this.startGame('dclass');
-    document.getElementById('btn-role-scientist').onclick = () => this.startGame('scientist');
-    document.getElementById('btn-role-mtf').onclick = () => this.startGame('mtf');
-    document.getElementById('btn-role-goc').onclick = () => this.startGame('goc');
-    document.getElementById('btn-role-ci').onclick = () => this.startGame('ci');
-    document.getElementById('btn-role-scp173').onclick = () => this.startGame('scp173');
-    document.getElementById('btn-menu-again').onclick = () => this._showMenu();
-    document.getElementById('btn-menu-restart').onclick = () => this._showMenu();
+    bind('btn-role-dclass', () => this.startGame('dclass'));
+    bind('btn-role-scientist', () => this.startGame('scientist'));
+    bind('btn-role-mtf', () => this.startGame('mtf'));
+    bind('btn-role-goc', () => this.startGame('goc'));
+    bind('btn-role-ci', () => this.startGame('ci'));
+    bind('btn-role-scp173', () => this.startGame('scp173'));
+    bind('btn-menu-again', () => this._showMenu());
+    bind('btn-menu-restart', () => this._showMenu());
 
     // 速度控制
-    document.getElementById('btn-pause').onclick = () => {
+    bind('btn-pause', () => {
       this.paused = !this.paused;
       this._updateButtonStates();
-    };
-    document.getElementById('btn-1x').onclick = () => { this.timeScale = 1; this._updateButtonStates(); };
-    document.getElementById('btn-2x').onclick = () => { this.timeScale = 2; this._updateButtonStates(); };
-    document.getElementById('btn-4x').onclick = () => { this.timeScale = 4; this._updateButtonStates(); };
+    });
+    bind('btn-1x', () => { this.timeScale = 1; this._updateButtonStates(); });
+    bind('btn-2x', () => { this.timeScale = 2; this._updateButtonStates(); });
+    bind('btn-4x', () => { this.timeScale = 4; this._updateButtonStates(); });
 
     // 显示切换
-    document.getElementById('btn-vision').onclick = (e) => {
-      this.renderer.showVision = !this.renderer.showVision;
-      e.target.classList.toggle('toggle-on');
-      e.target.classList.toggle('toggle-off');
+    const toggle = (prop) => (e) => {
+      this.renderer[prop] = !this.renderer[prop];
+      if (e && e.target) {
+        e.target.classList.toggle('toggle-on');
+        e.target.classList.toggle('toggle-off');
+      }
     };
-    document.getElementById('btn-hearing').onclick = (e) => {
-      this.renderer.showHearing = !this.renderer.showHearing;
-      e.target.classList.toggle('toggle-on');
-      e.target.classList.toggle('toggle-off');
-    };
-    document.getElementById('btn-paths').onclick = (e) => {
-      this.renderer.showPaths = !this.renderer.showPaths;
-      e.target.classList.toggle('toggle-on');
-      e.target.classList.toggle('toggle-off');
-    };
-    document.getElementById('btn-labels').onclick = (e) => {
-      this.renderer.showLabels = !this.renderer.showLabels;
-      e.target.classList.toggle('toggle-on');
-      e.target.classList.toggle('toggle-off');
-    };
+    bind('btn-vision', toggle('showVision'));
+    bind('btn-hearing', toggle('showHearing'));
+    bind('btn-paths', toggle('showPaths'));
+    bind('btn-labels', toggle('showLabels'));
 
     // 操作
-    document.getElementById('btn-restart').onclick = () => this._showMenu();
-    document.getElementById('btn-spawn-mtf').onclick = () => {
-      const npc = this.ai.spawnNPC('mtf_private', 'SZ');
+    bind('btn-restart', () => this._showMenu());
+    bind('btn-spawn-mtf', () => {
+      const npc = this.ai.spawnNPC('mtf_private', this.currentMap.levelId);
       if (npc) this.logEvent(`手动生成: ${npc.name}`, 'spawn');
-    };
-    document.getElementById('btn-spawn-ci').onclick = () => {
-      const npc = this.ai.spawnNPC('ci_soldier', 'SZ');
+    });
+    bind('btn-spawn-ci', () => {
+      const npc = this.ai.spawnNPC('ci_soldier', this.currentMap.levelId);
       if (npc) this.logEvent(`手动生成: ${npc.name}`, 'spawn');
-    };
-    document.getElementById('btn-spawn-scp').onclick = () => {
+    });
+    bind('btn-spawn-scp', () => {
       const types = ['scp_173', 'scp_049', 'scp_939'];
       const t = types[Math.floor(Math.random() * types.length)];
-      const npc = this.ai.spawnNPC(t, 'HCZ');
+      const npc = this.ai.spawnNPC(t, this.currentMap.levelId);
       if (npc) this.logEvent(`手动生成: ${npc.name}`, 'spawn');
-    };
+    });
 
     this._updateButtonStates();
   }
@@ -411,18 +422,17 @@ class Game {
   // HUD 更新
   // ============================================================
   _updateHUD() {
-    // 安全取元素: 缺失时返回 no-op 占位, 防止 HUD 错误杀死渲染循环
     const el = (id) => document.getElementById(id) || {
-      textContent: '',
-      innerHTML: '',
-      style: {},
-      classList: { add() {}, remove() {}, toggle() {} },
+      textContent: '', innerHTML: '', style: {}, classList: { add() {}, remove() {}, toggle() {} },
       appendChild() {}, removeChild() {}, scrollTop: 0, scrollHeight: 0, children: [],
     };
     el('hud-time').textContent = this._formatTime(this.gameTime);
     el('hud-phase').textContent = this.ai.currentPhase;
     el('hud-npcs').textContent = this.ai.getAliveNPCs().length;
     el('hud-fps').textContent = Math.round(this.fps);
+
+    // 当前区域显示
+    el('hud-level').textContent = this.currentMap ? LEVEL_NAMES[this.currentMap.levelId] : '';
 
     // 阵营统计
     const stats = this.ai.getFactionStats();
@@ -453,14 +463,12 @@ class Game {
     if (this.player && this.state === 'playing' && !this.player.dead) {
       playerHUD.classList.remove('hidden');
 
-      // HP
       const hpBar = el('player-hp-bar');
       hpBar.style.width = `${Math.max(0, this.player.hp / this.player.maxHp * 100)}%`;
       hpBar.style.background = this.player.hp / this.player.maxHp > 0.5 ? '#00ff88' :
                                this.player.hp / this.player.maxHp > 0.25 ? '#ffaa00' : '#ff3344';
       el('player-hp-text').textContent = `${Math.ceil(this.player.hp)}/${this.player.maxHp}`;
 
-      // 弹药
       if (this.player.weapon) {
         const wname = WEAPONS[this.player.weapon].name;
         el('player-ammo').textContent = `${wname} ${this.player.ammo >= 0 ? this.player.ammo : '∞'}`;
@@ -468,7 +476,6 @@ class Game {
         el('player-ammo').textContent = '徒手 — 寻找武器';
       }
 
-      // 钥匙卡显示
       const keycardEl = el('player-keycard');
       if (this.player.keycardLevel > 0) {
         const card = KEYCARDS[this.player.keycardLevel];
@@ -479,9 +486,8 @@ class Game {
         keycardEl.classList.add('hidden');
       }
 
-      // SCP-914 模式提示
       const modeEl = el('player-914-mode');
-      const nearby914 = this.facilities.getNearby914(this.player.pos, CONFIG.TILE_SIZE * 2.5);
+      const nearby914 = this.world.getFacilities(this.player.levelId).getNearby914(this.player.pos, CONFIG.TILE_SIZE * 2.5);
       if (nearby914) {
         modeEl.textContent = `SCP-914 [${nearby914.mode}] — E切换模式 / 进料舱内E激活`;
         modeEl.classList.remove('hidden');
@@ -489,11 +495,24 @@ class Game {
         modeEl.classList.add('hidden');
       }
 
+      // 传送点提示
+      const portalEl = el('player-portal-hint');
+      const portal = this.world.getNearbyPortal(this.player.pos, this.player.levelId);
+      if (portal) {
+        const need = portal.type === 'elevator' ? '无限制' : `Lv.${portal.level}`;
+        portalEl.textContent = `[E] ${portal.name} → ${LEVEL_NAMES[portal.targetLevelId]} (${need})`;
+        portalEl.classList.remove('hidden');
+      } else {
+        portalEl.classList.add('hidden');
+      }
+
+      // 物品栏
+      this._renderInventory(el);
+
       // 角色名
       el('player-role').textContent = this._roleName(this.player.role) +
         (this.player.recruited ? ' (MTF新兵)' : '');
 
-      // 173 注视警告
       const watchWarn = el('scp-watch-warning');
       if (this.player.role === 'scp173') {
         watchWarn.classList.toggle('hidden', !this.player.watched);
@@ -502,29 +521,47 @@ class Game {
         watchWarn.classList.add('hidden');
       }
 
-      // 任务面板
       this._renderMissionPanel();
     } else {
       playerHUD.classList.add('hidden');
     }
   }
 
+  _renderInventory(el) {
+    const invEl = el('player-inventory');
+    if (!this.player) { invEl.classList.add('hidden'); return; }
+
+    if (this.player.inventory.length === 0) {
+      invEl.innerHTML = '';
+      invEl.classList.add('hidden');
+      return;
+    }
+    invEl.classList.remove('hidden');
+
+    invEl.innerHTML = '';
+    for (let i = 0; i < this.player.inventory.length; i++) {
+      const item = this.player.inventory[i];
+      const div = document.createElement('div');
+      div.className = 'inv-item';
+      div.style.borderColor = item.def.color;
+      div.innerHTML = `<span class="inv-num">${i + 1}</span><span class="inv-name">${item.def.name}</span>`;
+      invEl.appendChild(div);
+    }
+  }
+
   _renderMissionPanel() {
     const panel = document.getElementById('mission-panel');
     if (!this.missions.active) return;
+    panel.classList.remove('hidden');
 
     const data = this.missions.getHudData();
-
-    // 阶段进度
     const stageLine = document.getElementById('mission-stage');
     const stage = data.stages[data.stage];
     stageLine.innerHTML = `<span style="color:#00ccff">阶段 ${data.stage + 1}/${data.stages.length}</span> — ${stage ? stage.name : ''}: ${stage ? stage.desc : ''}`;
 
-    // 进度条
     const bar = document.getElementById('mission-bar');
     bar.style.width = `${Math.min(100, data.progress)}%`;
 
-    // 目标列表
     const objList = document.getElementById('mission-objectives');
     objList.innerHTML = '';
     for (const obj of data.objectives) {
@@ -536,23 +573,29 @@ class Game {
     }
   }
 
-  // 构建共享 ctx (玩家/AI/设施共用)
+  // 构建共享 ctx (随玩家当前地图)
   _getCtx() {
+    const levelId = this.player ? this.player.levelId : this.world.currentLevelId;
     return {
-      map: this.map,
-      allEntities: this.ai.entities,
+      world: this.world,
+      map: this.world.getLevel(levelId),
+      allEntities: this.ai.entitiesIn(levelId),
       perception: this.perception,
       combat: this.combat,
-      facilities: this.facilities,
+      facilities: this.world.getFacilities(levelId),
+      pathfinder: this.world.getPathfinder(levelId),
       gameTime: this.gameTime,
       game: this,
+      levelId,
       player: this.player,
+      items: this.items,
     };
   }
 
   // 渲染
   renderGame() {
-    this.renderer.render(this.ai, this.combat, this.perception, this.facilities, this.gameTime);
+    const levelId = this.player ? this.player.levelId : this.world.currentLevelId;
+    this.renderer.render(this.ai, this.combat, this.perception, this.world.getFacilities(levelId), this.gameTime);
   }
 
   // ============================================================
@@ -562,7 +605,6 @@ class Game {
     const rawDt = this.lastFrameTime ? (timestamp - this.lastFrameTime) / 1000 : 0;
     this.lastFrameTime = timestamp;
 
-    // FPS
     this.fpsAccum += rawDt;
     this.fpsFrames++;
     if (this.fpsAccum >= 0.5) {
@@ -573,21 +615,26 @@ class Game {
 
     const dt = this.paused ? 0 : Math.min(rawDt, 0.05) * this.timeScale;
 
-    // 帧错误保护: 任何异常不得杀死渲染循环
     try {
       if (dt > 0 && this.state !== 'menu') {
         this.gameTime += dt;
         this.ai.update(dt, this);
+        this.items.update(dt);
 
-        // AI NPC 门禁处理 (有卡自动开门)
-        const ctxFac = this._getCtx();
-        for (const npc of this.ai.entities) {
-          if (npc.isPlayer || npc.dead) continue;
-          this.facilities.handleNPCDoor(npc, ctxFac);
+        // 各地图设施更新
+        for (const levelId of LEVEL_ORDER) {
+          const fac = this.world.getFacilities(levelId);
+          const ctxFac = this.ai.ctxFor({ levelId }, this);
+          ctxFac.allEntities = this.ai.entitiesIn(levelId);
+          ctxFac.map = this.world.getLevel(levelId);
+          fac.update(dt, ctxFac);
+
+          // AI NPC 门禁处理
+          for (const npc of this.ai.entitiesIn(levelId)) {
+            if (npc.isPlayer || npc.dead) continue;
+            fac.handleNPCDoor(npc, ctxFac);
+          }
         }
-
-        // 设施系统更新 (特斯拉电门/914)
-        this.facilities.update(dt, ctxFac);
 
         // 玩家更新
         if (this.player && !this.player.dead) {
@@ -597,7 +644,6 @@ class Game {
         }
       }
 
-      // 渲染
       this.renderGame();
       this._updateHUD();
     } catch (e) {
@@ -616,4 +662,9 @@ class Game {
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
   window.game = new Game();
+  // URL hash 自动开始 (便于测试: #mtf 或 #dclass)
+  const role = (location.hash || '').replace('#', '').toLowerCase();
+  if (['dclass', 'scientist', 'mtf', 'goc', 'ci', 'scp173'].includes(role)) {
+    setTimeout(() => window.game.startGame(role), 100);
+  }
 });

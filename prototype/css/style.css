@@ -85,6 +85,10 @@ body {
   color: var(--accent);
 }
 
+#hud-level {
+  color: #66ccff !important;
+}
+
 #hud-side {
   position: absolute;
   right: 8px;
@@ -415,6 +419,42 @@ body {
 #player-914-mode {
   font-size: 11px;
   color: var(--warn);
+}
+
+#player-portal-hint {
+  font-size: 11px;
+  color: #66ccff;
+  font-weight: bold;
+}
+
+/* 物品栏 */
+#player-inventory {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+#player-inventory.hidden { display: none; }
+
+.inv-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(30,30,45,0.8);
+  border: 1px solid;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 10px;
+}
+
+.inv-item .inv-num {
+  color: #888;
+  font-family: 'Consolas', monospace;
+}
+
+.inv-item .inv-name {
+  color: #fff;
 }
 
 .watch-warning {

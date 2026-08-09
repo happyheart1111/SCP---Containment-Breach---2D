@@ -243,6 +243,7 @@ const WEAPONS = {
   touch_plague: { name: '瘟疫接触', damage: 9999, range: 22, bulletSpeed: 0,  spread: 0,    scpDamage: 0,   knockback: 0,   color: '#ff0000', melee: true },
   pounce:   { name: '飞扑',       damage: 120, range: 60, bulletSpeed: 0,    spread: 0,    scpDamage: 0,   knockback: 0,   color: '#cc66ff', melee: true },
   melee:    { name: '近战',       damage: 15,  range: 30, bulletSpeed: 0,    spread: 0,    scpDamage: 0,   knockback: 0,   color: '#88aa00', melee: true },
+  scp127:   { name: 'SCP-127活体手枪', damage: 28, range: 380, bulletSpeed: 550, spread: 0.04, scpDamage: 0, knockback: 0, color: '#ffaa44', infinite: true },
 };
 
 // ============================================================
@@ -258,14 +259,62 @@ const WAVES = [
 ];
 
 // ============================================================
-// 地图区域定义
+// 地图区域定义 (SCP:SL 风格 — 4 张独立地图)
 // ============================================================
-const ZONES = {
-  LCZ: { name: 'Light Containment',  color: '#1a2a1a', x: 0,  y: 0,  cols: 32, rows: 20, keycardLevel: 1 },
-  HCZ: { name: 'Heavy Containment',  color: '#2a1a1a', x: 32, y: 0,  cols: 32, rows: 20, keycardLevel: 3 },
-  EZ:  { name: 'Entrance Zone',      color: '#1a1a2a', x: 0,  y: 20, cols: 32, rows: 20, keycardLevel: 4 },
-  SZ:  { name: 'Surface Zone',       color: '#2a2a1a', x: 32, y: 20, cols: 32, rows: 20, keycardLevel: 5 },
+const LEVEL_SIZES = {
+  SZ:  { cols: 48, rows: 32 },  // 地表区 (固定)
+  EZ:  { cols: 44, rows: 30 },  // 办公区 (随机)
+  HCZ: { cols: 44, rows: 30 },  // 重收容区 (随机)
+  LCZ: { cols: 44, rows: 30 },  // 轻收容区 (随机)
 };
+
+const LEVELS = {
+  SZ:  { id: 'SZ',  name: '地表区',     color: '#2a2a1a', keycardLevel: 5 },
+  EZ:  { id: 'EZ',  name: '办公区',     color: '#1a1a2a', keycardLevel: 4 },
+  HCZ: { id: 'HCZ', name: '重收容区',   color: '#2a1a1a', keycardLevel: 3 },
+  LCZ: { id: 'LCZ', name: '轻收容区',   color: '#1a2818', keycardLevel: 1 },
+};
+
+// 地图中文名 (HUD/日志用)
+const LEVEL_NAMES = {
+  SZ: '地表区', EZ: '办公区', HCZ: '重收容区', LCZ: '轻收容区',
+};
+
+// ============================================================
+// SCP 物品 (参考 SCP:CB — SCP-500/207/268/914 精加工物品)
+// ============================================================
+const SCP_ITEMS = {
+  scp500:  { id: 'scp500',  name: 'SCP-500 万能药', desc: '治愈一切伤病, 恢复满血',  color: '#ffffff', category: 'consumable', heal: 9999 },
+  medkit:  { id: 'medkit',  name: '急救包',         desc: '恢复 50 HP',              color: '#ff4444', category: 'consumable', heal: 50 },
+  scp207:  { id: 'scp207',  name: 'SCP-207 可乐',   desc: '+40% 移速, 缓慢掉血',     color: '#44ff88', category: 'consumable', buff: 'sprint', buffTime: 30 },
+  scp268:  { id: 'scp268',  name: 'SCP-268 隐形帽', desc: '15秒隐形, 不被注视',      color: '#8888ff', category: 'consumable', buff: 'invisible', buffTime: 15 },
+  scp714:  { id: 'scp714',  name: 'SCP-714 绿色圆环', desc: '减少受到的伤害',         color: '#44dd44', category: 'passive' },
+  scp127:  { id: 'scp127',  name: 'SCP-127 活体手枪', desc: '无限子弹手枪',           color: '#ffaa44', category: 'weapon', weapon: 'scp127' },
+  keycard: { id: 'keycard', name: '钥匙卡 (随机等级)', desc: '提升门禁权限',          color: '#ffdd44', category: 'keycard', cardLevel: null },
+  ammo:    { id: 'ammo',    name: '弹药箱',          desc: '+15 当前武器弹药',        color: '#ffcc00', category: 'ammo', ammoAmount: 15 },
+  weapon:  { id: 'weapon',  name: '武器 (随机)',      desc: '拾取一把武器',           color: '#ff8800', category: 'weapon', weapon: null },
+};
+
+// ============================================================
+// 物品刷新配置 (SCP:SL + RXSEND 风格)
+// ============================================================
+const ITEM_SPAWN_CONFIG = {
+  // 每张地图的刷新点数量与可刷物品
+  SZ:  { count: 8,  items: ['medkit', 'ammo', 'scp500', 'scp207', 'scp268', 'weapon'] },
+  EZ:  { count: 12, items: ['medkit', 'ammo', 'keycard', 'scp714', 'scp268', 'weapon'] },
+  HCZ: { count: 10, items: ['medkit', 'ammo', 'keycard', 'scp500', 'scp714', 'scp207', 'weapon'] },
+  LCZ: { count: 10, items: ['medkit', 'ammo', 'keycard', 'scp127', 'scp207', 'weapon'] },
+  ITEM_RESPAWN_TIME: 45,   // 物品被拾取后 45 秒重新刷新
+  INITIAL_DELAY: 5,        // 开局 5 秒后首次刷新
+};
+
+// 可生成武器池 (按稀有度权重)
+const WEAPON_SPAWN_POOL = [
+  { weapon: 'pistol',  w: 5 },
+  { weapon: 'rifle',   w: 3 },
+  { weapon: 'shotgun', w: 2 },
+  { weapon: 'energy',  w: 1 },
+];
 
 // ============================================================
 // 初始 NPC 生成列表 (波次0)
@@ -274,6 +323,7 @@ const INITIAL_SPAWNS = [
   { type: 'guard',      count: 2, zone: 'EZ'  },
   { type: 'dclass',     count: 3, zone: 'LCZ' },
   { type: 'scientist',  count: 2, zone: 'LCZ' },
+  { type: 'scientist',  count: 1, zone: 'HCZ' },  // HCZ 研究员 (173猎杀目标)
   { type: 'scp_173',    count: 1, zone: 'LCZ' },
   { type: 'scp_049',    count: 1, zone: 'HCZ' },
   { type: 'scp_939',    count: 2, zone: 'HCZ' },

@@ -140,6 +140,16 @@ class MissionSystem {
     }
   }
 
+  // 玩家跨图传送时推进阶段
+  onLevelChanged(levelId) {
+    if (!this.active || this.completed) return;
+    const stageIdx = this.stages.findIndex(s => s.zone === levelId);
+    if (stageIdx > this.stage) {
+      this.stage = stageIdx;
+      this.game.onStageAdvance(this.stages[this.stage]);
+    }
+  }
+
   // ============================================================
   // 目标状态更新
   // ============================================================
@@ -180,69 +190,58 @@ class MissionSystem {
 
   _aliveScientists(ctx) {
     let count = 0;
-    for (const e of ctx.allEntities) {
+    const entities = ctx.world ? ctx.world.entities : ctx.allEntities;
+    for (const e of entities) {
       if (e.faction === 'SCIENTIST' && !e.dead) count++;
     }
     return count;
   }
 
   // ============================================================
-  // D级: 按区域推进阶段, 到达出口胜利
+  // D级: 按区域推进阶段, 到达地表出口胜利
   // ============================================================
   _checkDClass(player, ctx) {
-    const tile = ctx.map.worldToTile(player.pos.x, player.pos.y);
-    const zone = ctx.map.getZone(tile.col, tile.row);
-
-    // 阶段推进
-    if (zone) {
-      const stageIdx = this.stages.findIndex(s => s.zone === zone);
-      if (stageIdx > this.stage && zone !== 'LCZ') {
-        // 只有向前推进才更新 (LCZ→HCZ→EZ→SZ)
-        if (zone === 'HCZ' || zone === 'EZ' || zone === 'SZ') {
-          this.stage = Math.max(this.stage, stageIdx);
-          this.game.onStageAdvance(this.stages[this.stage]);
+    // 到达地表出口 (SZ 地图上的 EXIT tile)
+    if (player.levelId === 'SZ') {
+      const szMap = ctx.world.getLevel('SZ');
+      const exit = szMap.exitPoints['SZ'];
+      if (exit) {
+        const ex = exit.col * CONFIG.TILE_SIZE;
+        const ey = exit.row * CONFIG.TILE_SIZE;
+        if (player.pos.x >= ex - CONFIG.TILE_SIZE && player.pos.x <= ex + CONFIG.TILE_SIZE * 2 &&
+            player.pos.y >= ey - CONFIG.TILE_SIZE && player.pos.y <= ey + CONFIG.TILE_SIZE * 2) {
+          player.reachedExit = true;
+          this.completed = true;
+          this.result = 'win';
+          this.resultReason = '你逃出了设施!';
+          this.game.onMissionEnd('win', this.resultReason);
         }
-      }
-    }
-
-    // 到达出口
-    const exit = ctx.map.exitPoints['SZ'];
-    if (exit) {
-      const ex = exit.col * CONFIG.TILE_SIZE;
-      const ey = exit.row * CONFIG.TILE_SIZE;
-      if (player.pos.x >= ex - CONFIG.TILE_SIZE && player.pos.x <= ex + CONFIG.TILE_SIZE * 2 &&
-          player.pos.y >= ey - CONFIG.TILE_SIZE && player.pos.y <= ey + CONFIG.TILE_SIZE * 2) {
-        player.reachedExit = true;
-        this.completed = true;
-        this.result = 'win';
-        this.resultReason = '你逃出了设施!';
-        this.game.onMissionEnd('win', this.resultReason);
       }
     }
   }
 
   // ============================================================
-  // 科学家: 收集3份文档 + 到达出口
+  // 科学家: 收集3份文档 + 到达地表出口
   // ============================================================
   _checkScientist(player, ctx) {
-    // 阶段推进按区域
-    this._advanceStageByZone(player, ctx);
-
-    // 到达出口: 需集齐文档
-    const exit = ctx.map.exitPoints['SZ'];
-    if (exit) {
-      const ex = exit.col * CONFIG.TILE_SIZE;
-      const ey = exit.row * CONFIG.TILE_SIZE;
-      if (player.pos.x >= ex - CONFIG.TILE_SIZE && player.pos.x <= ex + CONFIG.TILE_SIZE * 2 &&
-          player.pos.y >= ey - CONFIG.TILE_SIZE && player.pos.y <= ey + CONFIG.TILE_SIZE * 2) {
-        player.reachedExit = true;
-        if (player.docCount >= 3) {
-          this.completed = true;
-          this.result = 'win';
-          this.resultReason = '你带着3份SCP文档逃出了设施!';
-          this.game.onMissionEnd('win', this.resultReason);
-        } else {
-          this.game.logEvent(`文档不足! 需要 ${3 - player.docCount} 份 (已收集 ${player.docCount}/3)`, 'combat');
+    // 到达地表出口: 需集齐文档
+    if (player.levelId === 'SZ') {
+      const szMap = ctx.world.getLevel('SZ');
+      const exit = szMap.exitPoints['SZ'];
+      if (exit) {
+        const ex = exit.col * CONFIG.TILE_SIZE;
+        const ey = exit.row * CONFIG.TILE_SIZE;
+        if (player.pos.x >= ex - CONFIG.TILE_SIZE && player.pos.x <= ex + CONFIG.TILE_SIZE * 2 &&
+            player.pos.y >= ey - CONFIG.TILE_SIZE && player.pos.y <= ey + CONFIG.TILE_SIZE * 2) {
+          player.reachedExit = true;
+          if (player.docCount >= 3) {
+            this.completed = true;
+            this.result = 'win';
+            this.resultReason = '你带着3份SCP文档逃出了设施!';
+            this.game.onMissionEnd('win', this.resultReason);
+          } else {
+            this.game.logEvent(`文档不足! 需要 ${3 - player.docCount} 份 (已收集 ${player.docCount}/3)`, 'combat');
+          }
         }
       }
     }
@@ -272,12 +271,11 @@ class MissionSystem {
     }
   }
 
-  // 通用: 按所在区域推进阶段
+  // 通用: 按所在区域推进阶段 (多地图: 用 levelId)
   _advanceStageByZone(player, ctx) {
-    const tile = ctx.map.worldToTile(player.pos.x, player.pos.y);
-    const zone = ctx.map.getZone(tile.col, tile.row);
-    if (!zone) return;
-    const stageIdx = this.stages.findIndex(s => s.zone === zone);
+    const levelId = player.levelId;
+    if (!levelId) return;
+    const stageIdx = this.stages.findIndex(s => s.zone === levelId);
     if (stageIdx > this.stage) {
       this.stage = stageIdx;
       this.game.onStageAdvance(this.stages[this.stage]);
@@ -337,7 +335,11 @@ class MissionSystem {
     const p = this.game.player;
     if (!p) return 0;
     switch (this.role) {
-      case 'dclass':  return Math.round(p.pos.x / (CONFIG.MAP_COLS * CONFIG.TILE_SIZE) * 100);
+      case 'dclass': {
+        // 进度 = 到达的区域 (LCZ→EZ→HCZ→SZ)
+        const order = { LCZ: 10, EZ: 40, HCZ: 70, SZ: 100 };
+        return order[p.levelId] || 0;
+      }
       case 'scientist': return Math.round((p.docCount / 3 + (p.reachedExit ? 0.2 : 0)) * 100);
       case 'mtf':     return Math.round(p.containedCount / 3 * 100);
       case 'goc':     return Math.round(p.scpKills / 2 * 100);

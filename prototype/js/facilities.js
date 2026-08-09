@@ -105,105 +105,142 @@ class FacilitySystem {
   }
 
   // ============================================================
-  // 地图生成时放置设施
+  // 地图生成时放置设施 (每张地图独立)
   // ============================================================
   _placeFacilities() {
-    // ---- 1. 区域检查点门禁 ----
-    // 在区域边界通道上放置门禁 (LCZ-HCZ / HCZ-EZ / EZ-SZ)
-    const checkpoints = [
-      // LCZ(左) <-> HCZ(右) 边界 x=31
-      { col: 31, row: 5,  level: 3, name: 'LCZ-HCZ 检查点' },
-      { col: 31, row: 14, level: 3, name: 'LCZ-HCZ 检查点' },
-      // LCZ(上) <-> EZ(下) 边界 y=19
-      { col: 10, row: 19, level: 2, name: 'LCZ-EZ 检查点' },
-      { col: 22, row: 19, level: 2, name: 'LCZ-EZ 检查点' },
-      // HCZ(上) <-> SZ(下) 边界 y=19
-      { col: 42, row: 19, level: 4, name: 'HCZ-SZ 检查点' },
-      { col: 54, row: 19, level: 4, name: 'HCZ-SZ 检查点' },
-      // EZ(左) <-> SZ(右) 边界 x=31
-      { col: 31, row: 25, level: 5, name: 'EZ-SZ 检查点' },
-      { col: 31, row: 33, level: 5, name: 'EZ-SZ 检查点' },
-    ];
+    const levelId = this.map.levelId;
 
-    for (const cp of checkpoints) {
-      // 检查该位置是否真的是通道 (非墙)
-      if (this.map.isWalkable(cp.col, cp.row)) {
-        this.doors.push({
-          id: 'door_' + this.doors.length,
-          col: cp.col, row: cp.row,
-          level: cp.level,
-          name: cp.name,
-          open: false,
-          locked: true,
-          type: 'checkpoint',
-        });
-        // 标记为门禁 tile
-        this.map.grid[cp.row][cp.col] = TILE.DOOR;
-      }
+    // ---- 1. 地图内部普通门禁 (钥匙卡玩法) ----
+    // 随机在走廊/房间连接处放置 2-3 个普通门禁
+    this._placeInteriorDoors();
+
+    // ---- 2. SCP-914 室 (轻收容区/办公区) ----
+    if (levelId === 'LCZ' || levelId === 'EZ') {
+      this._place914();
     }
 
-    // ---- 2. SCP-914 室 (LCZ) ----
-    this._place914();
-
-    // ---- 3. 特斯拉电门 (HCZ/EZ 走廊) ----
-    this._placeTeslaGates();
+    // ---- 3. 特斯拉电门 (办公区/重收容区走廊) ----
+    if (levelId === 'EZ' || levelId === 'HCZ') {
+      this._placeTeslaGates();
+    }
   }
 
-  _place914() {
-    // 在 LCZ 找一个房间的中心作为 914 室
-    const lczTiles = [];
-    for (let r = 0; r < 20; r++) {
-      for (let c = 0; c < 32; c++) {
-        if (this.map.isWalkable(c, r) && this.map.zoneMap[r][c] === 'LCZ') {
-          lczTiles.push({ col: c, row: r });
+  _placeInteriorDoors() {
+    // 随机挑选可通行 tile 作为门禁位置 (非传送点/出生点)
+    const levelId = this.map.levelId;
+    const candidates = [];
+    for (let r = 1; r < this.map.rows - 1; r++) {
+      for (let c = 1; c < this.map.cols - 1; c++) {
+        if (this.map.grid[r][c] === TILE.CORRIDOR) {
+          // 门禁放在走廊中, 两侧应有墙
+          const sideWalls = (this.map.isWall(c - 1, r) && this.map.isWall(c + 1, r)) ||
+                            (this.map.isWall(c, r - 1) && this.map.isWall(c, r + 1));
+          if (sideWalls) candidates.push({ col: c, row: r });
         }
       }
     }
-    if (lczTiles.length === 0) return;
+    // 打乱取最多 3 个
+    const shuffled = candidates.sort(() => Math.random() - 0.5);
+    const count = Math.min(3, shuffled.length);
+    let placed = 0;
+    for (let i = 0; i < shuffled.length && placed < count; i++) {
+      const t = shuffled[i];
+      // 避免与传送点重叠 (传送点 tile 是 PORTAL 类型, 不在走廊里, 但再检查一下)
+      let nearPortal = false;
+      // 附近 3 格内是否有传送点
+      for (let dr = -2; dr <= 2 && !nearPortal; dr++) {
+        for (let dc = -2; dc <= 2 && !nearPortal; dc++) {
+          const r = t.row + dr, c = t.col + dc;
+          if (r >= 0 && r < this.map.rows && c >= 0 && c < this.map.cols && this.map.grid[r][c] === TILE.PORTAL) {
+            nearPortal = true;
+          }
+        }
+      }
+      if (nearPortal) continue;
 
-    // 随机选一个房间中心点
-    const center = lczTiles[Math.floor(Math.random() * lczTiles.length)];
+      const level = 1 + Math.floor(Math.random() * Math.min(3, 1 + (levelId === 'LCZ' ? 0 : levelId === 'EZ' ? 1 : 2)));
+      this.doors.push({
+        id: 'door_' + this.doors.length,
+        col: t.col, row: t.row,
+        level,
+        name: `${LEVEL_NAMES[levelId] || levelId} 内部检查点`,
+        open: false,
+        locked: true,
+        type: 'interior',
+      });
+      this.map.grid[t.row][t.col] = TILE.DOOR;
+      placed++;
+    }
+  }
+
+  _place914() {
+    // 在当前地图找一个可通行 tile 作为 914 室
+    const tiles = [];
+    for (let r = 0; r < this.map.rows; r++) {
+      for (let c = 0; c < this.map.cols; c++) {
+        if (this.map.isWalkable(c, r)) {
+          tiles.push({ col: c, row: r });
+        }
+      }
+    }
+    if (tiles.length === 0) return;
+
+    // 随机选一个, 远离传送点
+    let center = null;
+    for (let i = 0; i < 20; i++) {
+      const cand = tiles[Math.floor(Math.random() * tiles.length)];
+      let nearPortal = false;
+      for (const slot of this.map.portalSlots) {
+        if (Math.abs(slot.col - cand.col) + Math.abs(slot.row - cand.row) < 8) { nearPortal = true; break; }
+      }
+      if (!nearPortal) { center = cand; break; }
+    }
+    if (!center) center = tiles[Math.floor(Math.random() * tiles.length)];
+
+    // 挖出 914 室空间
+    for (let r = center.row - 1; r <= center.row + 1; r++) {
+      for (let c = center.col - 2; c <= center.col + 2; c++) {
+        if (r >= 0 && r < this.map.rows && c >= 0 && c < this.map.cols && this.map.grid[r][c] === TILE.WALL) {
+          this.map.grid[r][c] = TILE.CORRIDOR;
+        }
+      }
+    }
+
     const worldPos = this.map.tileToWorld(center.col, center.row);
 
     this.machines914.push({
-      id: '914_0',
+      id: '914_' + this.map.levelId,
       panelPos: new Vec2(worldPos.x, worldPos.y),
       mode: 'Fine',
       modeIndex: 3,
       processing: false,
       processTimer: 0,
-      PROCESS_TIME: 3, // 秒
-      // 进料/出料舱 (简化: 面板左右各 1.5 格)
+      PROCESS_TIME: 3,
       intakePos: new Vec2(worldPos.x - CONFIG.TILE_SIZE * 1.5, worldPos.y),
       outputPos: new Vec2(worldPos.x + CONFIG.TILE_SIZE * 1.5, worldPos.y),
-      inputPlayerId: null, // 站进料舱的玩家
+      inputPlayerId: null,
       lastResult: '',
       resultTimer: 0,
     });
   }
 
   _placeTeslaGates() {
-    // 在 HCZ 和 EZ 的走廊随机放置 2-3 个特斯拉电门
+    // 在当前地图的走廊随机放置 2-3 个特斯拉电门
     const corridors = [];
     for (let r = 0; r < this.map.rows; r++) {
       for (let c = 0; c < this.map.cols; c++) {
         if (this.map.grid[r][c] === TILE.CORRIDOR) {
-          const zone = this.map.zoneMap[r][c];
-          if (zone === 'HCZ' || zone === 'EZ') {
-            corridors.push({ col: c, row: r, zone });
-          }
+          corridors.push({ col: c, row: r });
         }
       }
     }
     if (corridors.length === 0) return;
 
-    // 随机选 2-3 个, 间隔至少 8 格
     const count = Math.min(3, corridors.length);
     const selected = [];
     for (let i = 0; i < count; i++) {
       const idx = Math.floor(Math.random() * corridors.length);
       const tile = corridors[idx];
-      // 避免与已选的太近
       let tooClose = false;
       for (const s of selected) {
         if (Math.abs(s.col - tile.col) + Math.abs(s.row - tile.row) < 10) {
@@ -211,21 +248,25 @@ class FacilitySystem {
           break;
         }
       }
+      // 避免在传送点附近
+      for (const slot of this.map.portalSlots) {
+        if (Math.abs(slot.col - tile.col) + Math.abs(slot.row - tile.row) < 6) { tooClose = true; break; }
+      }
       if (tooClose) continue;
 
       selected.push(tile);
       const worldPos = this.map.tileToWorld(tile.col, tile.row);
       this.teslaGates.push({
-        id: 'tesla_' + this.teslaGates.length,
+        id: 'tesla_' + this.map.levelId + '_' + this.teslaGates.length,
         col: tile.col, row: tile.row,
-        zone: tile.zone,
+        zone: this.map.levelId,
         pos: new Vec2(worldPos.x, worldPos.y),
-        state: 'idle',        // idle | charging | discharging
+        state: 'idle',
         stateTimer: 0,
-        cycle: 4 + Math.random() * 2, // 放电周期
-        chargeTime: 0.6,      // 充能时间(预兆)
-        dischargeTime: 0.8,   // 放电持续时间
-        cooldown: 2 + Math.random() * 2, // 放电后冷却
+        cycle: 4 + Math.random() * 2,
+        chargeTime: 0.6,
+        dischargeTime: 0.8,
+        cooldown: 2 + Math.random() * 2,
         lastDischarge: 0,
         arcParticles: [],
       });
@@ -236,7 +277,9 @@ class FacilitySystem {
   // 更新 (特斯拉电门周期 + 914 处理)
   // ============================================================
   update(dt, ctx) {
-    this._updateTeslaGates(dt, ctx);
+    // 只处理本地图内的实体
+    const entities = ctx.world ? ctx.world.entities.filter(e => e.levelId === this.map.levelId) : ctx.allEntities;
+    this._updateTeslaGates(dt, { ...ctx, allEntities: entities });
     this._update914(dt, ctx);
   }
 

@@ -1,12 +1,14 @@
 // ============================================================
-// renderer.js — Canvas 渲染器
+// renderer.js — Canvas 渲染器 (多地图版)
+// 只渲染当前地图 (世界切换), 支持传送点/物品
 // ============================================================
 
 class Renderer {
-  constructor(canvas, map) {
+  constructor(canvas, world) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
-    this.map = map;
+    this.world = world;
+    this.map = world ? world.getLevel(world.currentLevelId) : null;
     this.camera = { x: 0, y: 0, zoom: 1 };
     this.showVision = true;
     this.showHearing = true;
@@ -17,28 +19,31 @@ class Renderer {
     window.addEventListener('resize', () => this._resize());
   }
 
+  setWorld(world) {
+    this.world = world;
+    this.map = world ? world.getLevel(world.currentLevelId) : null;
+  }
+
   setMap(map) { this.map = map; }
 
   _resize() {
     this.canvas.width = window.innerWidth;
     this.canvas.height = window.innerHeight;
-    // 缩放使整个地图可见
-    const mapW = CONFIG.MAP_COLS * CONFIG.TILE_SIZE;
-    const mapH = CONFIG.MAP_ROWS * CONFIG.TILE_SIZE;
+    const map = this.map || { cols: 40, rows: 30 };
+    const mapW = map.cols * CONFIG.TILE_SIZE;
+    const mapH = map.rows * CONFIG.TILE_SIZE;
     const scaleX = this.canvas.width / mapW;
     const scaleY = this.canvas.height / mapH;
     this.camera.zoom = Math.min(scaleX, scaleY) * 0.95;
   }
 
   worldToScreen(x, y) {
-    const mapW = CONFIG.MAP_COLS * CONFIG.TILE_SIZE;
-    const mapH = CONFIG.MAP_ROWS * CONFIG.TILE_SIZE;
+    const map = this.map || { cols: 40, rows: 30 };
+    const mapW = map.cols * CONFIG.TILE_SIZE;
+    const mapH = map.rows * CONFIG.TILE_SIZE;
     const offsetX = (this.canvas.width - mapW * this.camera.zoom) / 2;
     const offsetY = (this.canvas.height - mapH * this.camera.zoom) / 2;
-    return {
-      x: offsetX + x * this.camera.zoom,
-      y: offsetY + y * this.camera.zoom,
-    };
+    return { x: offsetX + x * this.camera.zoom, y: offsetY + y * this.camera.zoom };
   }
 
   render(aiSystem, combat, perception, facilities, gameTime) {
@@ -46,24 +51,26 @@ class Renderer {
     ctx.fillStyle = '#050508';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    if (!this.map) return;
+    // 当前渲染地图: 优先玩家所在图, 否则世界当前图
+    let levelId = this.world ? this.world.currentLevelId : (this.map ? this.map.levelId : 'LCZ');
+    if (this.game && this.game.player) {
+      levelId = this.game.player.levelId;
+    }
+    const map = this.world ? this.world.getLevel(levelId) : this.map;
+    if (!map) return;
+    this.map = map;
 
     const ts = CONFIG.TILE_SIZE;
-    const z = this.camera.zoom;
+    const mapW = map.cols * ts;
+    const mapH = map.rows * ts;
 
-    // 计算 offset
-    const mapW = CONFIG.MAP_COLS * ts;
-    const mapH = CONFIG.MAP_ROWS * ts;
-
-    // 跟随模式: 玩家居中, 放大视角
-    let offX = (this.canvas.width - mapW * z) / 2;
-    let offY = (this.canvas.height - mapH * z) / 2;
+    let offX = (this.canvas.width - mapW * this.camera.zoom) / 2;
+    let offY = (this.canvas.height - mapH * this.camera.zoom) / 2;
 
     if (this.followTarget && !this.followTarget.dead) {
       const followZoom = 1.6;
       offX = this.canvas.width / 2 - this.followTarget.pos.x * followZoom;
       offY = this.canvas.height / 2 - this.followTarget.pos.y * followZoom;
-      // 钳制到地图范围
       offX = Math.min(0, Math.max(this.canvas.width - mapW * followZoom, offX));
       offY = Math.min(0, Math.max(this.canvas.height - mapH * followZoom, offY));
       ctx.save();
@@ -72,24 +79,23 @@ class Renderer {
     } else {
       ctx.save();
       ctx.translate(offX, offY);
-      ctx.scale(z, z);
+      ctx.scale(this.camera.zoom, this.camera.zoom);
     }
 
-    // ---- 1. 绘制地图 ----
-    this._drawMap(ctx);
+    // ---- 1. 地图 ----
+    this._drawMap(ctx, map);
 
-    // ---- 2. 绘制视野锥 ----
+    // ---- 2. 视野锥 ----
     if (this.showVision) {
-      for (const npc of aiSystem.entities) {
-        if (npc.dead) continue;
-        if (npc.visionRange <= 0) continue;
+      for (const npc of aiSystem.entitiesIn(map.levelId)) {
+        if (npc.dead || npc.visionRange <= 0) continue;
         this._drawVisionCone(ctx, npc);
       }
     }
 
-    // ---- 3. 绘制听觉范围 (仅声音猎手) ----
+    // ---- 3. 听觉 ----
     if (this.showHearing) {
-      for (const npc of aiSystem.entities) {
+      for (const npc of aiSystem.entitiesIn(map.levelId)) {
         if (npc.dead) continue;
         if (npc.isSoundHunter || npc.hearRange > 200) {
           this._drawHearingRange(ctx, npc);
@@ -97,15 +103,15 @@ class Renderer {
       }
     }
 
-    // ---- 4. 绘制路径 ----
+    // ---- 4. 路径 ----
     if (this.showPaths) {
-      for (const npc of aiSystem.entities) {
+      for (const npc of aiSystem.entitiesIn(map.levelId)) {
         if (npc.dead || !npc.path) continue;
-        this._drawPath(ctx, npc);
+        this._drawPath(ctx, npc, map);
       }
     }
 
-    // ---- 5. 绘制声音事件 ----
+    // ---- 5. 声音事件 ----
     for (const noise of perception.noiseEvents) {
       ctx.beginPath();
       ctx.arc(noise.x, noise.y, noise.radius * (1 - noise.age / noise.ttl) * 0.5, 0, Math.PI * 2);
@@ -114,39 +120,49 @@ class Renderer {
       ctx.stroke();
     }
 
-    // ---- 6. 绘制子弹 ----
+    // ---- 6. 子弹 (仅当前地图) ----
     for (const b of combat.bullets) {
+      if (b.levelId !== map.levelId) continue;
       ctx.beginPath();
       ctx.moveTo(b.x, b.y);
       ctx.lineTo(b.x - b.vx * 0.02, b.y - b.vy * 0.02);
       ctx.strokeStyle = b.color;
       ctx.lineWidth = 2;
       ctx.stroke();
-
-      // 子弹头
       ctx.beginPath();
       ctx.arc(b.x, b.y, 2, 0, Math.PI * 2);
       ctx.fillStyle = b.color;
       ctx.fill();
     }
 
-    // ---- 6b. 绘制设施 (门禁/914/特斯拉电门) ----
+    // ---- 6b. 设施 ----
     if (facilities) {
-      this._drawFacilities(ctx, facilities, gameTime);
+      this._drawFacilities(ctx, facilities, gameTime, map);
     }
 
-    // ---- 7. 绘制 NPC (跳过玩家) ----
-    for (const npc of aiSystem.entities) {
+    // ---- 6c. 传送点 ----
+    if (this.world) {
+      this._drawPortals(ctx, map, gameTime);
+    }
+
+    // ---- 6d. 物品 ----
+    if (this.game && this.game.items) {
+      this._drawItems(ctx, map);
+    }
+
+    // ---- 7. NPC ----
+    for (const npc of aiSystem.entitiesIn(map.levelId)) {
       if (npc.isPlayer) continue;
       this._drawNPC(ctx, npc);
     }
 
-    // ---- 7b. 绘制玩家 ----
-    if (this.game && this.game.player && this.game.state === 'playing') {
+    // ---- 7b. 玩家 ----
+    if (this.game && this.game.player && this.game.state === 'playing' &&
+        this.game.player.levelId === map.levelId) {
       this._drawPlayer(ctx, this.game.player, aiSystem);
     }
 
-    // ---- 8. 绘制伤害数字 ----
+    // ---- 8. 伤害数字 ----
     for (const dn of combat.damageNumbers) {
       const alpha = 1 - dn.age;
       ctx.font = 'bold 14px Consolas';
@@ -158,40 +174,41 @@ class Renderer {
     ctx.restore();
   }
 
-  _drawMap(ctx) {
+  _drawMap(ctx, map) {
     const ts = CONFIG.TILE_SIZE;
+    const levelId = map.levelId;
 
-    for (let r = 0; r < this.map.rows; r++) {
-      for (let c = 0; c < this.map.cols; c++) {
-        const tile = this.map.grid[r][c];
-        const zone = this.map.zoneMap[r][c];
+    for (let r = 0; r < map.rows; r++) {
+      for (let c = 0; c < map.cols; c++) {
+        const tile = map.grid[r][c];
         const x = c * ts;
         const y = r * ts;
 
         switch (tile) {
           case TILE.WALL:
-            // 墙壁颜色根据 zone 变化
-            ctx.fillStyle = zone ? '#1a1a22' : '#0a0a0e';
+            ctx.fillStyle = levelId === 'SZ' ? '#1a1a1e' : '#16161c';
             ctx.fillRect(x, y, ts, ts);
             break;
           case TILE.ROOM_FLOOR:
-            ctx.fillStyle = this._zoneFloorColor(zone);
+            ctx.fillStyle = this._zoneFloorColor(levelId);
             ctx.fillRect(x, y, ts, ts);
-            // 房间地板纹理
             ctx.strokeStyle = 'rgba(255,255,255,0.03)';
             ctx.lineWidth = 0.5;
             ctx.strokeRect(x + 0.5, y + 0.5, ts - 1, ts - 1);
             break;
           case TILE.CORRIDOR:
-            ctx.fillStyle = this._zoneCorridorColor(zone);
+            ctx.fillStyle = this._zoneCorridorColor(levelId);
             ctx.fillRect(x, y, ts, ts);
             break;
           case TILE.DOOR:
-          case TILE.ZONE_BORDER:
             ctx.fillStyle = '#3a3a2a';
             ctx.fillRect(x, y, ts, ts);
             ctx.fillStyle = '#6a6a3a';
             ctx.fillRect(x + ts * 0.3, y + ts * 0.2, ts * 0.4, ts * 0.6);
+            break;
+          case TILE.PORTAL:
+            ctx.fillStyle = levelId === 'SZ' ? '#1a1a1e' : '#16161c';
+            ctx.fillRect(x, y, ts, ts);
             break;
           case TILE.EXIT:
             ctx.fillStyle = '#2a4a2a';
@@ -216,20 +233,15 @@ class Renderer {
     // 区域标签
     ctx.font = 'bold 16px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    const zones = [
-      { name: 'LCZ', x: 16 * ts, y: 3 * ts },
-      { name: 'HCZ', x: 48 * ts, y: 3 * ts },
-      { name: 'EZ',  x: 16 * ts, y: 23 * ts },
-      { name: 'SZ',  x: 48 * ts, y: 23 * ts },
-    ];
-    for (const z of zones) {
-      ctx.fillText(z.name, z.x, z.y);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    const lvl = LEVELS[levelId];
+    if (lvl) {
+      ctx.fillText(lvl.name, map.cols * ts / 2, 2 * ts);
     }
   }
 
-  _zoneFloorColor(zone) {
-    switch (zone) {
+  _zoneFloorColor(levelId) {
+    switch (levelId) {
       case 'LCZ': return '#1a2818';
       case 'HCZ': return '#281818';
       case 'EZ':  return '#181828';
@@ -238,36 +250,143 @@ class Renderer {
     }
   }
 
-  _zoneCorridorColor(zone) {
-    switch (zone) {
+  _zoneCorridorColor(levelId) {
+    switch (levelId) {
       case 'LCZ': return '#152218';
       case 'HCZ': return '#221515';
       case 'EZ':  return '#151522';
-      case 'SZ':  return '#222215';
+      case 'SZ':  return '#1f1f10';
       default:    return '#151515';
     }
   }
 
-  _drawVisionCone(ctx, npc) {
-    if (npc.visionAngle >= Math.PI * 2) return; // 全向视野不画锥
+  // ============================================================
+  // 传送点渲染 (电梯/检查点)
+  // ============================================================
+  _drawPortals(ctx, map, gameTime) {
+    const ts = CONFIG.TILE_SIZE;
+    const portals = this.world.getPortalsIn(map.levelId);
 
+    for (const p of portals) {
+      const x = p.pos.x, y = p.pos.y;
+
+      if (p.type === 'elevator') {
+        // 电梯: 双扇门 + 指示灯
+        ctx.fillStyle = '#2a2a3a';
+        ctx.fillRect(x - ts * 0.5, y - ts * 0.6, ts, ts * 1.2);
+        ctx.strokeStyle = '#445566';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x - ts * 0.5, y - ts * 0.6, ts, ts * 1.2);
+
+        // 门缝
+        ctx.strokeStyle = 'rgba(0,200,255,0.4)';
+        ctx.beginPath();
+        ctx.moveTo(x, y - ts * 0.5);
+        ctx.lineTo(x, y + ts * 0.5);
+        ctx.stroke();
+
+        // 指示灯 (脉冲)
+        const pulse = 0.5 + 0.5 * Math.sin(gameTime * 3 + p.id.length);
+        ctx.fillStyle = `rgba(0,255,136,${0.4 + pulse * 0.5})`;
+        ctx.beginPath();
+        ctx.arc(x, y - ts * 0.75, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 标签
+        ctx.fillStyle = '#66ccff';
+        ctx.font = 'bold 9px Consolas';
+        ctx.textAlign = 'center';
+        ctx.fillText('ELEV', x, y - ts * 0.9);
+        ctx.font = '8px sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fillText(`→ ${LEVEL_NAMES[p.targetLevelId]}`, x, y + ts * 0.85);
+      } else {
+        // 检查点: 门 + 锁
+        ctx.fillStyle = '#2a2a3a';
+        ctx.fillRect(x - ts * 0.5, y - ts * 0.5, ts, ts);
+        ctx.strokeStyle = 'rgba(255,170,0,0.6)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x - ts * 0.5, y - ts * 0.5, ts, ts);
+
+        // 等级
+        ctx.fillStyle = p.level >= 5 ? '#ff44aa' : '#ffaa00';
+        ctx.font = 'bold 10px Consolas';
+        ctx.textAlign = 'center';
+        ctx.fillText('Lv.' + p.level, x, y - 3);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = '8px sans-serif';
+        ctx.fillText(`→ ${LEVEL_NAMES[p.targetLevelId]}`, x, y + ts * 0.6);
+      }
+    }
+  }
+
+  // ============================================================
+  // 物品渲染
+  // ============================================================
+  _drawItems(ctx, map) {
+    const items = this.game.items;
+    if (!items || !items.items) return;
+    const ts = CONFIG.TILE_SIZE;
+
+    for (const item of items.items) {
+      if (item.taken || item.levelId !== map.levelId) continue;
+      const x = item.pos.x, y = item.pos.y;
+      const def = item.def;
+      const color = def.color || '#ffffff';
+
+      // 发光底座
+      ctx.fillStyle = color + '22';
+      ctx.beginPath();
+      ctx.arc(x, y, 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 物品图标 (圆)
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff60';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // SCP 物品特殊标记
+      if (def.category === 'consumable' && def.id.startsWith('scp')) {
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 7px Consolas';
+        ctx.textAlign = 'center';
+        ctx.fillText('SCP', x, y + 2);
+      } else if (def.category === 'weapon') {
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 8px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('W', x, y + 3);
+      } else if (def.category === 'keycard') {
+        ctx.fillStyle = '#222';
+        ctx.font = 'bold 8px Consolas';
+        ctx.textAlign = 'center';
+        ctx.fillText(def.cardLevel, x, y + 3);
+      }
+    }
+  }
+
+  // ============================================================
+  // 原有渲染方法 (NPC/玩家/设施) — 适配 map 参数
+  // ============================================================
+  _drawVisionCone(ctx, npc) {
+    if (npc.visionAngle >= Math.PI * 2) return;
     const halfAngle = npc.visionAngle / 2;
     const segments = 12;
-
     ctx.beginPath();
     ctx.moveTo(npc.pos.x, npc.pos.y);
     for (let i = 0; i <= segments; i++) {
       const t = i / segments;
       const angle = npc.facing - halfAngle + npc.visionAngle * t;
-      const x = npc.pos.x + Math.cos(angle) * npc.visionRange;
-      const y = npc.pos.y + Math.sin(angle) * npc.visionRange;
-      ctx.lineTo(x, y);
+      ctx.lineTo(npc.pos.x + Math.cos(angle) * npc.visionRange, npc.pos.y + Math.sin(angle) * npc.visionRange);
     }
     ctx.closePath();
-
-    // 阵营颜色
     const c = npc.factionInfo.color;
-    ctx.fillStyle = c + '15'; // 透明度
+    ctx.fillStyle = c + '15';
     ctx.fill();
     ctx.strokeStyle = c + '30';
     ctx.lineWidth = 1;
@@ -284,13 +403,13 @@ class Renderer {
     ctx.setLineDash([]);
   }
 
-  _drawPath(ctx, npc) {
+  _drawPath(ctx, npc, map) {
     if (!npc.path || npc.path.length < 2) return;
     ctx.beginPath();
     ctx.moveTo(npc.pos.x, npc.pos.y);
     for (let i = npc.pathIndex; i < npc.path.length; i++) {
       const node = npc.path[i];
-      const w = this.map.tileToWorld(node.col, node.row);
+      const w = map.tileToWorld(node.col, node.row);
       ctx.lineTo(w.x, w.y);
     }
     ctx.strokeStyle = npc.factionInfo.color + '40';
@@ -302,7 +421,6 @@ class Renderer {
 
   _drawNPC(ctx, npc) {
     if (npc.dead) {
-      // 尸体: 暗色 X
       ctx.strokeStyle = '#444';
       ctx.lineWidth = 2;
       const r = npc.radius;
@@ -317,7 +435,6 @@ class Renderer {
 
     const c = npc.factionInfo.color;
 
-    // 受击闪烁
     if (npc.flashTimer > 0) {
       ctx.beginPath();
       ctx.arc(npc.pos.x, npc.pos.y, npc.radius + 4, 0, Math.PI * 2);
@@ -325,7 +442,6 @@ class Renderer {
       ctx.fill();
     }
 
-    // 攻击动画
     if (npc.attackAnimTimer > 0) {
       ctx.beginPath();
       ctx.arc(npc.pos.x, npc.pos.y, npc.radius + 6, 0, Math.PI * 2);
@@ -334,20 +450,17 @@ class Renderer {
       ctx.stroke();
     }
 
-    // 身体
     ctx.beginPath();
     ctx.arc(npc.pos.x, npc.pos.y, npc.radius, 0, Math.PI * 2);
     ctx.fillStyle = c;
     ctx.fill();
 
-    // 边框
     ctx.strokeStyle = npc.fsm.state === 'engage' ? '#ff4444' :
                       npc.fsm.state === 'alert'  ? '#ffaa00' :
                       npc.fsm.state === 'flee'   ? '#ffff00' : '#00000060';
     ctx.lineWidth = npc.fsm.state === 'engage' ? 2.5 : 1.5;
     ctx.stroke();
 
-    // 朝向指示器
     const fx = npc.pos.x + Math.cos(npc.facing) * (npc.radius + 4);
     const fy = npc.pos.y + Math.sin(npc.facing) * (npc.radius + 4);
     ctx.beginPath();
@@ -357,7 +470,6 @@ class Renderer {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // SCP 标记
     if (npc.isSCP) {
       ctx.beginPath();
       ctx.arc(npc.pos.x, npc.pos.y, npc.radius + 3, 0, Math.PI * 2);
@@ -368,15 +480,12 @@ class Renderer {
       ctx.setLineDash([]);
     }
 
-    // 标签
     if (this.showLabels) {
       ctx.font = '9px Consolas';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#ffffffcc';
-      const label = npc.name;
-      ctx.fillText(label, npc.pos.x, npc.pos.y - npc.radius - 5);
+      ctx.fillText(npc.name, npc.pos.x, npc.pos.y - npc.radius - 5);
 
-      // HP 条
       const hpW = npc.radius * 2.5;
       const hpH = 3;
       const hpX = npc.pos.x - hpW / 2;
@@ -387,7 +496,6 @@ class Renderer {
                       npc.hp / npc.maxHp > 0.25 ? '#ffaa00' : '#ff3344';
       ctx.fillRect(hpX, hpY, hpW * (npc.hp / npc.maxHp), hpH);
 
-      // 状态标签
       if (npc.fsm.state !== 'patrol') {
         ctx.font = '8px Consolas';
         ctx.fillStyle = npc.fsm.state === 'engage' ? '#ff4444' :
@@ -398,13 +506,13 @@ class Renderer {
     }
   }
 
-  // ============================================================
-  // 玩家渲染
-  // ============================================================
   _drawPlayer(ctx, player, aiSystem) {
     const c = player.color;
 
-    // 受击闪烁
+    // 隐形效果
+    const invisible = player.buffs && player.buffs['invisible'] && player.buffs['invisible'].time > 0;
+    const alpha = invisible ? 0.3 : 1;
+
     if (player.flashTimer > 0) {
       ctx.beginPath();
       ctx.arc(player.pos.x, player.pos.y, player.radius + 5, 0, Math.PI * 2);
@@ -412,7 +520,6 @@ class Renderer {
       ctx.fill();
     }
 
-    // SCP-173: 注视警告光环
     if (player.role === 'scp173') {
       ctx.beginPath();
       ctx.arc(player.pos.x, player.pos.y, player.radius + 8, 0, Math.PI * 2);
@@ -423,18 +530,18 @@ class Renderer {
       ctx.setLineDash([]);
     }
 
-    // 身体
+    ctx.globalAlpha = alpha;
     ctx.beginPath();
     ctx.arc(player.pos.x, player.pos.y, player.radius, 0, Math.PI * 2);
     ctx.fillStyle = c;
     ctx.fill();
 
-    // 白色玩家描边
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2.5;
     ctx.stroke();
+    ctx.globalAlpha = 1;
 
-    // 朝向指示器
+    // 朝向指示器 (鼠标方向)
     const fx = player.pos.x + Math.cos(player.facing) * (player.radius + 5);
     const fy = player.pos.y + Math.sin(player.facing) * (player.radius + 5);
     ctx.beginPath();
@@ -444,7 +551,6 @@ class Renderer {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // 持枪角色: 鼠标瞄准线 (MTF/GOC/CI/持枪D级)
     if (player.weapon && player.role !== 'scp173' && this.game && this.game.mouseWorld) {
       const mw = this.game.mouseWorld;
       const dx = mw.x - player.pos.x;
@@ -461,7 +567,6 @@ class Renderer {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // 准星
       ctx.beginPath();
       ctx.arc(mw.x, mw.y, 5, 0, Math.PI * 2);
       ctx.strokeStyle = '#ff3344';
@@ -469,7 +574,6 @@ class Renderer {
       ctx.stroke();
     }
 
-    // 标签
     if (this.showLabels) {
       ctx.font = 'bold 10px Consolas';
       ctx.textAlign = 'center';
@@ -478,7 +582,6 @@ class Renderer {
       const roleName = ROLE_NAMES[player.role] || player.role;
       ctx.fillText(`你 (${roleName})`, player.pos.x, player.pos.y - player.radius - 8);
 
-      // HP 条
       const hpW = player.radius * 3;
       const hpH = 4;
       const hpX = player.pos.x - hpW / 2;
@@ -490,7 +593,6 @@ class Renderer {
       ctx.fillRect(hpX, hpY, hpW * Math.max(0, player.hp / player.maxHp), hpH);
     }
 
-    // 173: 显示击杀进度
     if (player.role === 'scp173') {
       ctx.font = 'bold 12px Consolas';
       ctx.textAlign = 'center';
@@ -499,60 +601,49 @@ class Renderer {
     }
   }
 
-  // ============================================================
-  // 设施渲染: 钥匙卡门禁 / SCP-914 / 特斯拉电门
-  // ============================================================
-  _drawFacilities(ctx, facilities, gameTime) {
-    // ---- 钥匙卡门禁 ----
+  _drawFacilities(ctx, facilities, gameTime, map) {
+    // 门禁
     for (const door of facilities.doors) {
-      const w = this.map.tileToWorld(door.col, door.row);
+      const w = map.tileToWorld(door.col, door.row);
       const x = w.x, y = w.y;
       const ts = CONFIG.TILE_SIZE;
 
       if (door.open) {
-        // 开启: 亮色通道
         ctx.fillStyle = 'rgba(0,255,136,0.15)';
         ctx.fillRect(x - ts / 2, y - ts / 2, ts, ts);
         ctx.strokeStyle = 'rgba(0,255,136,0.4)';
         ctx.lineWidth = 1;
         ctx.strokeRect(x - ts / 2, y - ts / 2, ts, ts);
       } else {
-        // 锁定: 暗色门 + 锁图标 + 等级
         ctx.fillStyle = '#2a2a3a';
         ctx.fillRect(x - ts / 2, y - ts / 2, ts, ts);
         ctx.strokeStyle = 'rgba(255,51,68,0.6)';
         ctx.lineWidth = 2;
         ctx.strokeRect(x - ts / 2, y - ts / 2, ts, ts);
 
-        // 锁图标
         ctx.fillStyle = '#ff5566';
         ctx.font = 'bold 11px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('🔒', x, y - 2);
 
-        // 等级标签
         ctx.fillStyle = door.level >= 5 ? '#ff44aa' : '#ffaa00';
         ctx.font = 'bold 9px Consolas';
         ctx.fillText('Lv.' + door.level, x, y + ts * 0.35);
       }
     }
 
-    // ---- SCP-914 ----
+    // SCP-914
     for (const m of facilities.machines914) {
       const ts2 = CONFIG.TILE_SIZE;
-
-      // 进料舱/出料舱
       this._draw914Booth(ctx, m.intakePos, 'INTAKE', '进料');
       this._draw914Booth(ctx, m.outputPos, 'OUTPUT', '出料');
 
-      // 主体
       ctx.fillStyle = '#3a2a1a';
       ctx.strokeStyle = '#8a6a3a';
       ctx.lineWidth = 2;
       ctx.fillRect(m.panelPos.x - ts2 * 0.9, m.panelPos.y - ts2 * 0.7, ts2 * 1.8, ts2 * 1.4);
       ctx.strokeRect(m.panelPos.x - ts2 * 0.9, m.panelPos.y - ts2 * 0.7, ts2 * 1.8, ts2 * 1.4);
 
-      // 齿轮动画
       ctx.save();
       ctx.translate(m.panelPos.x, m.panelPos.y - ts2 * 0.5);
       ctx.rotate(m.processing ? gameTime * 3 : gameTime * 0.5);
@@ -567,25 +658,21 @@ class Renderer {
       ctx.stroke();
       ctx.restore();
 
-      // 模式显示
       ctx.fillStyle = m.processing ? '#ffaa00' : '#00ccff';
       ctx.font = 'bold 11px Consolas';
       ctx.textAlign = 'center';
       ctx.fillText(m.mode, m.panelPos.x, m.panelPos.y + ts2 * 0.5);
 
-      // 面板标签
       ctx.fillStyle = '#aa8866';
       ctx.font = '8px sans-serif';
       ctx.fillText('SCP-914', m.panelPos.x, m.panelPos.y - ts2 * 0.9);
 
-      // 处理中动画
       if (m.processing) {
         ctx.fillStyle = '#ffaa00';
         ctx.font = '10px Consolas';
         ctx.fillText('加工中...', m.panelPos.x, m.panelPos.y + ts2 * 0.8);
       }
 
-      // 结果提示
       if (m.lastResult && m.resultTimer > 0) {
         ctx.fillStyle = '#00ff88';
         ctx.font = 'bold 11px Consolas';
@@ -593,21 +680,18 @@ class Renderer {
       }
     }
 
-    // ---- 特斯拉电门 ----
+    // 特斯拉电门
     for (const gate of facilities.teslaGates) {
       const ts3 = CONFIG.TILE_SIZE;
       const x = gate.pos.x, y = gate.pos.y;
 
-      // 底座
       ctx.fillStyle = '#1a1a2a';
       ctx.fillRect(x - ts3 * 0.5, y - ts3 * 0.3, ts3, ts3 * 0.6);
 
-      // 两个线圈柱
       ctx.fillStyle = '#334';
       ctx.fillRect(x - ts3 * 0.45, y - ts3 * 0.5, ts3 * 0.2, ts3);
       ctx.fillRect(x + ts3 * 0.25, y - ts3 * 0.5, ts3 * 0.2, ts3);
 
-      // 顶部球
       ctx.fillStyle = gate.state === 'discharging' ? '#88ffff' :
                       gate.state === 'charging' ? '#4488ff' : '#555577';
       ctx.beginPath();
@@ -615,7 +699,6 @@ class Renderer {
       ctx.arc(x + ts3 * 0.35, y - ts3 * 0.5, 3, 0, Math.PI * 2);
       ctx.fill();
 
-      // 充能: 蓝色波纹
       if (gate.state === 'charging') {
         const pulse = 0.4 + 0.6 * Math.sin(gameTime * 20);
         ctx.strokeStyle = `rgba(68,136,255,${0.3 + pulse * 0.4})`;
@@ -625,7 +708,6 @@ class Renderer {
         ctx.setLineDash([]);
       }
 
-      // 放电: 电弧
       if (gate.state === 'discharging') {
         ctx.strokeStyle = 'rgba(120,220,255,0.9)';
         ctx.lineWidth = 2;
@@ -638,7 +720,6 @@ class Renderer {
           ctx.stroke();
         }
 
-        // 电弧粒子
         for (const p of gate.arcParticles) {
           ctx.fillStyle = `rgba(120,220,255,${Math.max(0, p.life / p.maxLife)})`;
           ctx.beginPath();

@@ -8,12 +8,13 @@ class PerceptionSystem {
     this.noiseEvents = []; // 当前活跃的声音事件
   }
 
-  // 发出声音事件
+  // 发出声音事件 (多地图: 记录来源地图)
   emitNoise(pos, radius, intensity, source) {
     this.noiseEvents.push({
       x: pos.x, y: pos.y,
       radius, intensity,
       source,
+      levelId: source && source.levelId ? source.levelId : null,
       age: 0,
       ttl: 0.5, // 声音持续 0.5 秒
     });
@@ -67,7 +68,7 @@ class PerceptionSystem {
     return { entity: closest, dist: closestDist };
   }
 
-  // 听觉检测: 某实体能否听到声音
+  // 听觉检测: 某实体能否听到声音 (同图过滤)
   static checkHearing(observer, noiseEvents) {
     if (observer.hearRange <= 0) return null;
 
@@ -75,6 +76,9 @@ class PerceptionSystem {
     let closestDist = Infinity;
 
     for (const noise of noiseEvents) {
+      // 跨地图声音不可闻
+      if (noise.levelId && observer.levelId && noise.levelId !== observer.levelId) continue;
+
       const dist = Math.hypot(noise.x - observer.pos.x, noise.y - observer.pos.y);
       if (dist > noise.radius) continue; // 声音传不到
       if (dist > observer.hearRange) continue; // 听不到

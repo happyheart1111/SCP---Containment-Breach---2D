@@ -14,9 +14,10 @@ class CombatSystem {
   }
 
   scheduleZombie(victim, source) {
-    // 049 复活: 1.5秒后在尸体位置生成僵尸
+    // 049 复活: 1.5秒后在尸体位置生成僵尸 (带地图)
     this.pendingZombies.push({
       pos: victim.pos.clone(),
+      levelId: victim.levelId,
       timer: 1.5,
       source: source,
     });
@@ -45,7 +46,7 @@ class CombatSystem {
     }
   }
 
-  update(dt, ctx) {
+  update(dt, aiSystem, game) {
     // 更新子弹
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
@@ -61,40 +62,42 @@ class CombatSystem {
         continue;
       }
 
+      // 子弹所属地图
+      const map = aiSystem.world.getLevel(b.levelId);
+      if (!map) { this.bullets.splice(i, 1); continue; }
+
       // 撞墙
-      const tile = ctx.map.worldToTile(b.x, b.y);
-      if (ctx.map.isWall(tile.col, tile.row)) {
+      const tile = map.worldToTile(b.x, b.y);
+      if (map.isWall(tile.col, tile.row)) {
         this.bullets.splice(i, 1);
         continue;
       }
 
-      // 撞实体
+      // 撞实体 (仅同图实体)
+      const levelEntities = aiSystem.entitiesIn(b.levelId);
       let hit = false;
-      for (const e of ctx.allEntities) {
+      for (const e of levelEntities) {
         if (e === b.source || e.dead) continue;
-        // 不能打友军
         if (!isHostile(b.faction, e.faction) && !isAlly(b.faction, e.faction) && b.faction !== e.faction) {
-          // 中立不打, 但 tense 会打
           const r = getRelation(b.faction, e.faction);
           if (r !== 'enemy') continue;
         } else if (isAlly(b.faction, e.faction)) {
-          continue; // 不打友军
+          continue;
         }
 
         const d = Math.hypot(b.x - e.pos.x, b.y - e.pos.y);
         if (d < e.radius + 3) {
-          // 命中
           let damage = b.damage;
           if (e.isSCP && b.scpDamage > 0) {
-            damage = b.scpDamage; // 能量武器对 SCP 用 scpDamage
+            damage = b.scpDamage;
           } else if (e.isSCP) {
-            damage = 0; // 普通武器对 SCP 无效
+            damage = 0;
           }
 
           if (damage > 0) {
+            const ctx = aiSystem.ctxFor(e, game);
             this.dealDamage(e, damage, b.source, 'bullet', ctx);
           } else {
-            // 子弹弹开效果
             this.spawnDamageNumber(e.pos.x, e.pos.y - 20, 0, '#666');
           }
 
@@ -112,9 +115,9 @@ class CombatSystem {
       const pz = this.pendingZombies[i];
       pz.timer -= dt;
       if (pz.timer <= 0) {
-        const zombie = NPCFactory.createZombie(pz.pos, 50000 + i);
-        ctx.allEntities.push(zombie);
-        ctx.game.logEvent(`SCP-049 复活了 049-2 僵尸`, 'spawn');
+        const zombie = NPCFactory.createZombie(pz.pos, pz.levelId, 50000 + i);
+        aiSystem.entities.push(zombie);
+        game.logEvent(`SCP-049 复活了 049-2 僵尸`, 'spawn');
         this.pendingZombies.splice(i, 1);
       }
     }
@@ -123,7 +126,7 @@ class CombatSystem {
     for (let i = this.damageNumbers.length - 1; i >= 0; i--) {
       const dn = this.damageNumbers[i];
       dn.age += dt;
-      dn.y -= 30 * dt; // 上浮
+      dn.y -= 30 * dt;
       if (dn.age > 1.0) {
         this.damageNumbers.splice(i, 1);
       }

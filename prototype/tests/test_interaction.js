@@ -1,9 +1,9 @@
-// 定向交互测试: 173秒杀 / D级转职 / MTF击杀SCP
+// 定向交互测试 v1.0.0: 173秒杀 / D级转职 / MTF击杀SCP (多地图)
 const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const files = ['config.js','vector2.js','fsm.js','pathfinding.js','mapsystem.js','perception.js','npc.js','npcfactory.js','aisystem.js','combatsystem.js','player.js','missions.js'];
+const files = ['config.js','vector2.js','fsm.js','pathfinding.js','mapsystem.js','facilities.js','world.js','perception.js','npc.js','npcfactory.js','aisystem.js','combatsystem.js','itemsystem.js','player.js','missions.js'];
 const sandbox = { console, Math, Date, window: {}, document: undefined };
 vm.createContext(sandbox);
 for (const f of files) {
@@ -11,10 +11,11 @@ for (const f of files) {
 }
 const get = (name) => vm.runInContext(name, sandbox);
 const CONFIG = get('CONFIG');
-const MapGenerator = get('MapGenerator');
+const GameWorld = get('GameWorld');
 const AISystem = get('AISystem');
 const PerceptionSystem = get('PerceptionSystem');
 const CombatSystem = get('CombatSystem');
+const ItemSystem = get('ItemSystem');
 const Player = get('Player');
 const MissionSystem = get('MissionSystem');
 const Vec2 = get('Vec2');
@@ -30,37 +31,41 @@ const mockGame = {
   onStageAdvance: () => {},
   onMissionEnd: (r, reason) => events.push('END:' + r + ':' + reason),
   onSCPContained: () => {},
+  onLevelChanged: () => {},
   get player() { return sandbox.testPlayer; },
 };
 
 function makeWorld() {
-  const map = MapGenerator.generate();
-  const perception = new PerceptionSystem(map);
+  const world = new GameWorld().generate();
+  const perception = new PerceptionSystem();
   const combat = new CombatSystem();
-  const ai = new AISystem(map, combat, perception);
+  const ai = new AISystem(world, combat, perception);
+  const items = new ItemSystem(world);
+  world.items = items;
   ai.initialize();
-  return { map, perception, combat, ai };
+  return { world, perception, combat, ai, items };
 }
 
-function makePlayer(role, pos) {
-  const p = new Player(role, pos.clone());
+function makePlayer(role, pos, levelId) {
+  const p = new Player(role, pos.clone(), levelId);
   p.input = { keys: { KeyW: false, KeyS: false, KeyA: false, KeyD: false }, mouseDown: false };
+  p.mouseWorld = pos.clone();
   sandbox.testPlayer = p;
   return p;
 }
 
 // ============ 测试1: SCP-173 秒杀人类 ============
 {
-  const { map, perception, combat, ai } = makeWorld();
-  // 找个人类 NPC 作为猎物
+  const { world, perception, combat, ai } = makeWorld();
   let victim = ai.entities.find(e => e.faction === 'DCLASS' || e.faction === 'SCIENTIST');
   if (!victim) victim = ai.entities[0];
-  const player = makePlayer('scp173', victim.pos.clone());
+  const player = makePlayer('scp173', victim.pos.clone(), victim.levelId);
   player.pos.x = victim.pos.x + 3;
   player.pos.y = victim.pos.y + 3;
   ai.entities.push(player);
 
-  const ctx = { map, allEntities: ai.entities, perception, combat, gameTime: 0, game: mockGame, player };
+  const ctx = ai.ctxFor(player, mockGame);
+  ctx.items = world.items;
   for (let i = 0; i < 10; i++) {
     ctx.gameTime = i / 60;
     ai.update(1/60, mockGame);
@@ -71,15 +76,15 @@ function makePlayer(role, pos) {
 
 // ============ 测试2: D级接触MTF转职 ============
 {
-  const { map, perception, combat, ai } = makeWorld();
-  // 手动生成一个 MTF 放在固定位置
+  const { world, perception, combat, ai } = makeWorld();
   const mtf = ai.spawnNPC('mtf_private', 'SZ');
-  const player = makePlayer('dclass', mtf.pos.clone());
+  const player = makePlayer('dclass', mtf.pos.clone(), 'SZ');
   player.pos.x = mtf.pos.x + 5;
   player.pos.y = mtf.pos.y + 5;
   ai.entities.push(player);
 
-  const ctx = { map, allEntities: ai.entities, perception, combat, gameTime: 0, game: mockGame, player };
+  const ctx = ai.ctxFor(player, mockGame);
+  ctx.items = world.items;
   for (let i = 0; i < 60; i++) {
     ctx.gameTime = i / 60;
     ai.update(1/60, mockGame);
@@ -87,7 +92,6 @@ function makePlayer(role, pos) {
   }
   console.log('测试2 D级转职:', player.recruited ? 'PASS (被招募)' : 'FAIL (未转职)',
     'faction=' + player.faction, 'weapon=' + player.weapon);
-  console.log('  事件:', events.slice(-3).join(' | '));
 }
 
 // ============ 测试3: 阵营关系验证 ============

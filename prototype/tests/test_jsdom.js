@@ -1,4 +1,4 @@
-// jsdom 测试 v3: 所有代码+测试逻辑同一个 eval 作用域执行
+// jsdom 测试 v1.0.0: 多地图架构 + 所有角色 + 物品系统
 const fs = require('fs');
 const path = require('path');
 const { JSDOM } = require('C:/Users/admin/.workbuddy/binaries/node/workspace/node_modules/jsdom');
@@ -25,16 +25,15 @@ const mockCtx = new Proxy({}, {
 window.HTMLCanvasElement.prototype.getContext = () => mockCtx;
 
 const scripts = [
-  'config.js','vector2.js','fsm.js','pathfinding.js','mapsystem.js','facilities.js',
+  'config.js','vector2.js','fsm.js','pathfinding.js','mapsystem.js','facilities.js','world.js',
   'perception.js','npc.js','npcfactory.js','aisystem.js','combatsystem.js',
-  'player.js','missions.js','renderer.js','game.js'
+  'itemsystem.js','player.js','missions.js','renderer.js','game.js'
 ];
 let allCode = '';
 for (const s of scripts) {
   allCode += fs.readFileSync(path.join(PROTOTYPE, 'js', s), 'utf8') + '\n';
 }
 
-// 测试逻辑 (同一个 eval 作用域, 可访问 class)
 allCode += `
 ;(function() {
   const results = [];
@@ -43,21 +42,25 @@ allCode += `
   try {
     const game = new Game();
     log('Game 构造: OK');
+    log('地图数量: ' + Object.keys(game.world.levels).length + ' (期望4)');
+    log('传送点数量: ' + game.world.portals.length + ' (期望8)');
+    log('物品刷新点: ' + game.items.spawnPoints.length);
+    log('当前地图: ' + game.currentMap.levelId);
 
     // 测试六个角色 startGame
     for (const role of ['dclass', 'scientist', 'mtf', 'goc', 'ci', 'scp173']) {
       try {
         game.startGame(role);
         const p = game.player;
-        log('startGame(' + role + '): OK state=' + game.state + ' player=' + (p ? p.role : 'null') + ' hp=' + (p ? p.hp : '-'));
-        game.state = 'menu'; // 回到菜单
+        log('startGame(' + role + '): OK state=' + game.state + ' player=' + (p ? p.role : 'null') + ' hp=' + (p ? p.hp : '-') + ' level=' + (p ? p.levelId : '-'));
+        game.state = 'menu';
       } catch (e) {
         log('startGame(' + role + ') 抛错: ' + e.message);
         log(e.stack.split('\\n').slice(0, 6).join(' | '));
       }
     }
 
-    // 模拟六个按钮点击 (验证 onclick 绑定)
+    // 模拟六个按钮点击
     try {
       const btnMap = { dclass: 'btn-role-dclass', scientist: 'btn-role-scientist', mtf: 'btn-role-mtf', goc: 'btn-role-goc', ci: 'btn-role-ci', scp173: 'btn-role-scp173' };
       for (const [role, btnId] of Object.entries(btnMap)) {
@@ -67,7 +70,6 @@ allCode += `
       }
     } catch (e) {
       log('按钮点击抛错: ' + e.message);
-      log(e.stack.split('\\n').slice(0, 6).join(' | '));
     }
 
     // 跑 60 帧验证循环不死
@@ -81,6 +83,44 @@ allCode += `
     } catch (e) {
       log('循环抛错: ' + e.message);
       log(e.stack.split('\\n').slice(0, 6).join(' | '));
+    }
+
+    // 测试传送: 把玩家放到 LCZ 传送点旁并传送
+    try {
+      game.startGame('dclass');
+      const lczPortals = game.world.getPortalsIn('LCZ');
+      if (lczPortals.length > 0) {
+        const p0 = lczPortals[0];
+        game.player.pos = p0.pos.clone();
+        game.player.levelId = 'LCZ';
+        const ctx = game._getCtx();
+        game.player.tryInteract(ctx);
+        log('传送测试: 目标地图=' + game.player.levelId + ' (从LCZ)');
+      } else {
+        log('传送测试: LCZ无传送点 (跳过)');
+      }
+    } catch (e) {
+      log('传送测试抛错: ' + e.message);
+    }
+
+    // 测试物品拾取 (选可入物品栏的: consumable/passive)
+    try {
+      game.startGame('dclass');
+      const items = game.items.items;
+      const pickable = items.find(it => it.def.category === 'consumable' || it.def.category === 'passive');
+      if (pickable) {
+        game.player.pos = pickable.pos.clone();
+        game.player.levelId = pickable.levelId;
+        const ctx = game._getCtx();
+        game.player._tryPickupItem(ctx);
+        log('物品拾取测试: 拾取=' + game.player.inventory.length + ' item=' + pickable.itemId + ' (' + pickable.def.name + ')');
+      } else if (items.length > 0) {
+        log('物品拾取测试: 无消耗品可拾取 (跳过, 共' + items.length + '件物品)');
+      } else {
+        log('物品拾取测试: 无物品生成 (跳过)');
+      }
+    } catch (e) {
+      log('物品拾取测试抛错: ' + e.message);
     }
 
     console.log('RESULT_START');
