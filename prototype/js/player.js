@@ -309,10 +309,30 @@ class Player {
   }
 
   // ============================================================
-  // SCP-173
+  // SCP-173 (玩家版): 眨眼机制 + 猎杀
   // ============================================================
   _updateSCP173(dt, ctx) {
-    this.watched = this._isWatched(ctx);
+    // 眨眼计时 (SCP原设定: 周期眨眼, 眨眼瞬间无视注视可移动)
+    if (this.blinkTimer === undefined) {
+      this.blinkTimer = 2 + Math.random() * 2;
+      this.blinking = false;
+      this.blinkRemain = 0;
+      this.blinkDuration = 0.5;
+      this.blinkInterval = 4 + Math.random() * 2;
+    }
+    this.blinkTimer -= dt;
+    if (this.blinking) {
+      this.blinkRemain -= dt;
+      if (this.blinkRemain <= 0) {
+        this.blinking = false;
+        this.blinkTimer = this.blinkInterval;
+      }
+    } else if (this.blinkTimer <= 0) {
+      this.blinking = true;
+      this.blinkRemain = this.blinkDuration;
+    }
+
+    this.watched = !this.blinking && this._isWatched(ctx);
 
     if (this.watched) {
       this.vel.x = 0;

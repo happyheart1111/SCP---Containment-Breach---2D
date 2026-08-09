@@ -123,6 +123,41 @@ allCode += `
       log('物品拾取测试抛错: ' + e.message);
     }
 
+    // 测试开始菜单按钮
+    try {
+      game.state = 'menu';
+      document.getElementById('start-menu').classList.remove('hidden');
+      document.getElementById('role-menu').classList.add('hidden');
+      document.getElementById('btn-start-play').click();
+      log('开始菜单: 开始游戏 → role-menu 显示=' + !document.getElementById('role-menu').classList.contains('hidden'));
+      document.getElementById('btn-start-observe').click();
+      log('开始菜单: 观察模式 state=' + game.state + ' player=' + (game.player ? game.player.role : 'null'));
+    } catch (e) {
+      log('开始菜单测试抛错: ' + e.message);
+    }
+
+    // 测试 Tab 背包开关
+    try {
+      game.startGame('dclass');
+      const pickable = game.items.items.find(it => it.def.category === 'consumable' || it.def.category === 'passive');
+      if (pickable) {
+        game.player.pos = pickable.pos.clone();
+        game.player.levelId = pickable.levelId;
+        const ctx = game._getCtx();
+        game.player._tryPickupItem(ctx);
+      }
+      const invPanel = document.getElementById('inventory-panel');
+      game.inventoryOpen = true;
+      game._setInventoryPanel(true);
+      game._renderInventoryPanel();
+      log('Tab背包: 打开后 hidden=' + invPanel.classList.contains('hidden') + ' 物品=' + game.player.inventory.length + ' 格子=' + document.querySelectorAll('#inv-grid .inv-slot').length);
+      game.inventoryOpen = false;
+      game._setInventoryPanel(false);
+      log('Tab背包: 关闭后 hidden=' + invPanel.classList.contains('hidden'));
+    } catch (e) {
+      log('Tab背包测试抛错: ' + e.message);
+    }
+
     console.log('RESULT_START');
     results.forEach(r => console.log('  ' + r));
     console.log('RESULT_END');

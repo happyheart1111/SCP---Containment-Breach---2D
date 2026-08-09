@@ -24,6 +24,11 @@ class Game {
     // 玩家引用 (由角色选择创建)
     this.player = null;
 
+    // 背包/控制面板状态
+    this.inventoryOpen = false;
+    this.selectedInvIndex = -1;
+    this.controlsCollapsed = false;
+
     this.cameraFollow = false;
 
     this._initWorld();
@@ -114,7 +119,10 @@ class Game {
 
     // 隐藏菜单
     document.getElementById('role-menu').classList.add('hidden');
+    document.getElementById('start-menu').classList.add('hidden');
     document.getElementById('gameover-screen').classList.add('hidden');
+    this.inventoryOpen = false;
+    this._setInventoryPanel(false);
   }
 
   _roleName(role) {
@@ -122,6 +130,25 @@ class Game {
       dclass: 'D级人员', scientist: '科学家', mtf: 'MTF特遣队',
       goc: 'GOC特工', ci: '混沌分裂者', scp173: 'SCP-173'
     }[role] || role;
+  }
+
+  // 观察模式: 不选角色, 直接观看 AI 阵营自主交战
+  startObserve() {
+    this._restartWorld();
+    this.player = null;
+    this.state = 'playing';
+    this.gameTime = 0;
+    this.cameraFollow = false;
+    this.renderer.followTarget = null;
+    this.renderer.showLabels = true;
+    this.renderer.showVision = false;
+    this.inventoryOpen = false;
+    this._setInventoryPanel(false);
+    document.getElementById('start-menu').classList.add('hidden');
+    document.getElementById('role-menu').classList.add('hidden');
+    document.getElementById('gameover-screen').classList.add('hidden');
+    this.logEvent('观察模式: 设施已生成, AI 阵营自主交战', 'spawn');
+    this.logEvent('提示: 这是无玩家的纯仿真, 观察波次推进与阵营博弈', 'info');
   }
 
   // D级出生点: 离所有 SCP 最远的可通行 tile
@@ -278,7 +305,17 @@ class Game {
         if (numMap[e.code] !== undefined) {
           const ctx = this._getCtx();
           this.player.tryUseInventory(numMap[e.code], ctx);
+          this.selectedInvIndex = -1;
         }
+      }
+
+      // Tab: 背包开/关
+      if (e.code === 'Tab' && this.state === 'playing' && this.player && !this.player.dead) {
+        e.preventDefault();
+        this.inventoryOpen = !this.inventoryOpen;
+        this.selectedInvIndex = -1;
+        this._setInventoryPanel(this.inventoryOpen);
+        return;
       }
 
       if (this.state === 'gameover' && e.code === 'Enter') {
@@ -348,8 +385,45 @@ class Game {
     bind('btn-role-goc', () => this.startGame('goc'));
     bind('btn-role-ci', () => this.startGame('ci'));
     bind('btn-role-scp173', () => this.startGame('scp173'));
-    bind('btn-menu-again', () => this._showMenu());
+    bind('btn-menu-again', () => this._showRoleMenu());
     bind('btn-menu-restart', () => this._showMenu());
+
+    // 开始菜单
+    bind('btn-start-play', () => this._showRoleMenu());
+    bind('btn-start-observe', () => this.startObserve());
+
+    // 控制面板折叠
+    bind('btn-controls-toggle', () => {
+      this.controlsCollapsed = !this.controlsCollapsed;
+      const ctrl = document.getElementById('hud-controls');
+      if (ctrl) ctrl.classList.toggle('collapsed', this.controlsCollapsed);
+    });
+
+    // 背包格子点击 (使用物品)
+    const grid = document.getElementById('inv-grid');
+    if (grid) {
+      grid.addEventListener('click', (e) => {
+        const slot = e.target.closest('.inv-slot');
+        if (!slot || !this.player) return;
+        const idx = parseInt(slot.dataset.idx || '-1', 10);
+        if (idx >= 0 && idx < this.player.inventory.length) {
+          const ctx = this._getCtx();
+          this.player.tryUseInventory(idx, ctx);
+          this.selectedInvIndex = -1;
+          this._renderInventoryPanel();
+        }
+      });
+      // 悬停选中查看详情
+      grid.addEventListener('mouseover', (e) => {
+        const slot = e.target.closest('.inv-slot');
+        if (!slot || !this.player) return;
+        const idx = parseInt(slot.dataset.idx || '-1', 10);
+        if (idx >= 0 && idx < this.player.inventory.length && idx !== this.selectedInvIndex) {
+          this.selectedInvIndex = idx;
+          this._renderInventoryPanel();
+        }
+      });
+    }
 
     // 速度控制
     bind('btn-pause', () => {
@@ -394,8 +468,23 @@ class Game {
   }
 
   _showMenu() {
+    // 返回开始菜单 (主菜单)
     this.state = 'menu';
     this.cameraFollow = false;
+    this.inventoryOpen = false;
+    this._setInventoryPanel(false);
+    document.getElementById('start-menu').classList.remove('hidden');
+    document.getElementById('role-menu').classList.add('hidden');
+    document.getElementById('gameover-screen').classList.add('hidden');
+  }
+
+  _showRoleMenu() {
+    // 开始菜单 → 角色选择
+    this.state = 'menu';
+    this.cameraFollow = false;
+    this.inventoryOpen = false;
+    this._setInventoryPanel(false);
+    document.getElementById('start-menu').classList.add('hidden');
     document.getElementById('role-menu').classList.remove('hidden');
     document.getElementById('gameover-screen').classList.add('hidden');
   }
@@ -515,8 +604,15 @@ class Game {
 
       const watchWarn = el('scp-watch-warning');
       if (this.player.role === 'scp173') {
-        watchWarn.classList.toggle('hidden', !this.player.watched);
-        watchWarn.textContent = this.player.watched ? '⚠ 被注视 — 冻结!' : '';
+        if (this.player.blinking) {
+          watchWarn.classList.remove('hidden');
+          watchWarn.textContent = '👁 眨眼! 可移动';
+          watchWarn.style.color = '#ffcc00';
+        } else {
+          watchWarn.classList.toggle('hidden', !this.player.watched);
+          watchWarn.textContent = this.player.watched ? '⚠ 被注视 — 冻结!' : '';
+          watchWarn.style.color = '#ff3344';
+        }
       } else {
         watchWarn.classList.add('hidden');
       }
@@ -528,25 +624,80 @@ class Game {
   }
 
   _renderInventory(el) {
-    const invEl = el('player-inventory');
-    if (!this.player) { invEl.classList.add('hidden'); return; }
-
-    if (this.player.inventory.length === 0) {
-      invEl.innerHTML = '';
-      invEl.classList.add('hidden');
-      return;
+    // 背包面板: 仅在打开时渲染
+    if (this.inventoryOpen) {
+      this._renderInventoryPanel();
     }
-    invEl.classList.remove('hidden');
+  }
 
-    invEl.innerHTML = '';
-    for (let i = 0; i < this.player.inventory.length; i++) {
-      const item = this.player.inventory[i];
-      const div = document.createElement('div');
-      div.className = 'inv-item';
-      div.style.borderColor = item.def.color;
-      div.innerHTML = `<span class="inv-num">${i + 1}</span><span class="inv-name">${item.def.name}</span>`;
-      invEl.appendChild(div);
+  // ============================================================
+  // 背包面板 (Tab 开关)
+  // ============================================================
+  _setInventoryPanel(open) {
+    const panel = document.getElementById('inventory-panel');
+    if (!panel) return;
+    panel.classList.toggle('hidden', !open);
+  }
+
+  _renderInventoryPanel() {
+    const panel = document.getElementById('inventory-panel');
+    if (!panel) return;
+    const player = this.player;
+    if (!player) return;
+
+    const countEl = document.getElementById('inv-count');
+    if (countEl) countEl.textContent = `${player.inventory.length}/${player.maxInventory}`;
+
+    const grid = document.getElementById('inv-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    // 6 格固定槽位
+    for (let i = 0; i < player.maxInventory; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'inv-slot';
+      slot.dataset.idx = String(i);
+
+      if (i < player.inventory.length) {
+        const item = player.inventory[i];
+        const def = item.def;
+        const shortName = def.name.length > 8 ? def.name.slice(0, 8) + '…' : def.name;
+        const iconChar = def.category === 'consumable' ? (def.heal ? '✚' : def.buff === 'sprint' ? '⚡' : '◈') : '◆';
+        slot.innerHTML = `
+          <span class="slot-num">${i + 1}</span>
+          <span class="slot-icon" style="background:${def.color}">${iconChar}</span>
+          <span class="slot-name">${shortName}</span>
+        `;
+        if (i === this.selectedInvIndex) slot.classList.add('selected');
+        slot.title = def.name + ': ' + def.desc;
+      } else {
+        slot.classList.add('empty');
+        slot.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-name">空</span>`;
+      }
+      grid.appendChild(slot);
     }
+
+    // 详情
+    const detail = document.getElementById('inv-detail');
+    if (detail) {
+      if (this.selectedInvIndex >= 0 && this.selectedInvIndex < player.inventory.length) {
+        const item = player.inventory[this.selectedInvIndex];
+        detail.classList.remove('hidden');
+        detail.innerHTML = `
+          <div class="detail-name" style="color:${item.def.color}">${item.def.name}</div>
+          <div class="detail-desc">${item.def.desc || ''}</div>
+          <div class="detail-use">点击使用 · 或按数字键 ${this.selectedInvIndex + 1}</div>
+        `;
+      } else {
+        detail.classList.add('hidden');
+        detail.innerHTML = '';
+      }
+    }
+  }
+
+  // 选中背包格子 (鼠标悬停/点击)
+  selectInventoryIndex(idx) {
+    this.selectedInvIndex = idx;
   }
 
   _renderMissionPanel() {

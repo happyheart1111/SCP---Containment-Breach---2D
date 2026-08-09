@@ -159,7 +159,7 @@ class Renderer {
     // ---- 7b. 玩家 ----
     if (this.game && this.game.player && this.game.state === 'playing' &&
         this.game.player.levelId === map.levelId) {
-      this._drawPlayer(ctx, this.game.player, aiSystem);
+      this._drawPlayer(ctx, this.game.player, aiSystem, gameTime);
     }
 
     // ---- 8. 伤害数字 ----
@@ -506,7 +506,7 @@ class Renderer {
     }
   }
 
-  _drawPlayer(ctx, player, aiSystem) {
+  _drawPlayer(ctx, player, aiSystem, gameTime) {
     const c = player.color;
 
     // 隐形效果
@@ -521,6 +521,17 @@ class Renderer {
     }
 
     if (player.role === 'scp173') {
+      // 眨眼视觉反馈: 眨眼中显示金色脉冲光环
+      if (player.blinking) {
+        const pulse = 0.5 + 0.5 * Math.sin(gameTime * 20);
+        ctx.beginPath();
+        ctx.arc(player.pos.x, player.pos.y, player.radius + 10, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,204,0,${0.4 + pulse * 0.5})`;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([10, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       ctx.beginPath();
       ctx.arc(player.pos.x, player.pos.y, player.radius + 8, 0, Math.PI * 2);
       ctx.strokeStyle = player.watched ? '#ff3344' : '#00ff88';

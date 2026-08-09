@@ -65,6 +65,13 @@ class NPC {
     this.movingFast = false;
     this.flashTimer = 0;
     this.attackAnimTimer = 0;
+
+    // SCP-173 眨眼机制 (SCP原设定: 周期性眨眼, 眨眼瞬间可移动)
+    this.blinkTimer = 2 + Math.random() * 3;   // 眨眼倒计时
+    this.blinking = false;                     // 眨眼中 (可无视注视移动)
+    this.blinkRemain = 0;                      // 眨眼剩余时间
+    this.blinkDuration = 0.6;                  // 眨眼持续
+    this.blinkInterval = 5 + Math.random() * 3; // 眨眼间隔
   }
 
   _initFSM() {
@@ -536,30 +543,64 @@ class NPC {
     }
   }
 
+  // ============================================================
+  // SCP-173: 眨眼瞬移猎杀 (SCP原设定)
+  // - 周期性眨眼: 眨眼瞬间即使被注视也能移动 (SCP:CB核心机制)
+  // - 目标优先级: 优先猎杀武装目标 (威胁更大)
+  // - 近距离直线扑杀, 远距离A*绕行
+  // ============================================================
   _behaviorSCP173(dt, ctx) {
-    const beingWatched = this._isBeingWatched(ctx);
+    // 眨眼计时 (SCP原设定: 周期眨眼, 眨眼瞬间无视注视)
+    this.blinkTimer -= dt;
+    if (this.blinking) {
+      this.blinkRemain -= dt;
+      if (this.blinkRemain <= 0) {
+        this.blinking = false;
+        this.blinkTimer = this.blinkInterval + Math.random() * 2;
+      }
+    } else if (this.blinkTimer <= 0) {
+      this.blinking = true;
+      this.blinkRemain = this.blinkDuration;
+    }
+
+    const beingWatched = !this.blinking && this._isBeingWatched(ctx);
+
     if (beingWatched) {
+      // 被注视且未眨眼: 冻结
       this.vel.x = 0; this.vel.y = 0;
       this.speed = 0;
     } else {
-      this.speed = 200;
-      let nearest = null;
-      let nearestDist = Infinity;
+      this.speed = 210;
+      // 目标选择: 优先武装人类 (MTF/守卫/CI/GOC), 其次平民
+      let best = null;
+      let bestScore = -Infinity;
       for (const e of ctx.world.entities) {
-        if (e === this || e.dead || e.faction === 'SCP' || e.faction === 'ZOMBIE') continue;
+        if (e === this || e.dead || e.isSCP) continue;
         const d = Vec2.dist(this.pos, e.pos);
-        if (d < nearestDist) { nearestDist = d; nearest = e; }
+        let score = 0;
+        // 距离权重
+        score += Math.max(0, 400 - d);
+        // 武装目标权重 (有武器威胁大, 优先猎杀)
+        if (e.weapon && WEAPONS[e.weapon] && !WEAPONS[e.weapon].melee) score += 300;
+        // 正在交战的目标权重低 (可能在被队友打)
+        if (e.fsm && e.fsm.state === 'engage') score -= 150;
+        if (score > bestScore) { bestScore = score; best = e; }
       }
-      if (nearest) {
-        if (nearest.levelId !== this.levelId) {
-          this.patrolZone = nearest.levelId;
-        } else if (nearestDist < 320) {
-          this._moveTowards(nearest.pos, dt, ctx);
-          if (nearestDist < this.radius + nearest.radius + 5) {
-            ctx.combat.dealDamage(nearest, 9999, this, 'touch_kill', ctx);
+
+      if (best) {
+        const dist = Vec2.dist(this.pos, best.pos);
+        if (best.levelId !== this.levelId) {
+          this.patrolZone = best.levelId;
+        } else if (dist < 320) {
+          // 近距离: 直线扑杀 (接触即死)
+          this._moveTowards(best.pos, dt, ctx);
+          if (dist < this.radius + best.radius + 5) {
+            ctx.combat.dealDamage(best, 9999, this, 'touch_kill', ctx);
+            this.attackAnimTimer = 0.3;
           }
         } else {
-          this._behaviorWander(dt, ctx);
+          // 远距离: A* 绕行接近 (避免卡墙)
+          this._moveTowardsPath(best.pos, dt, ctx);
         }
       } else {
         this._behaviorWander(dt, ctx);
@@ -567,23 +608,37 @@ class NPC {
     }
   }
 
+  // ============================================================
+  // SCP-049: 瘟疫医生猎杀 (制造僵尸军团)
+  // - 目标选择: 优先无武器平民 (更容易杀死并复活)
+  // - 已有僵尸随行时: 专注找新目标扩展军团
+  // ============================================================
   _behaviorSCP049(dt, ctx) {
-    let nearest = null;
-    let nearestDist = Infinity;
+    let best = null;
+    let bestScore = -Infinity;
     for (const e of ctx.world.entities) {
-      if (e === this || e.dead || e.faction === 'SCP' || e.faction === 'ZOMBIE') continue;
+      if (e === this || e.dead || e.isSCP) continue;
       const d = Vec2.dist(this.pos, e.pos);
-      if (d < nearestDist) { nearestDist = d; nearest = e; }
+      let score = Math.max(0, 500 - d);
+      // 无武器平民优先 (制造僵尸)
+      if (!e.weapon || !WEAPONS[e.weapon]) score += 200;
+      // 已被僵尸纠缠的目标降低 (避免抢怪)
+      if (e.fsm && e.fsm.state === 'engage') score -= 100;
+      if (score > bestScore) { bestScore = score; best = e; }
     }
 
-    if (nearest) {
-      if (nearest.levelId !== this.levelId) {
-        this.patrolZone = nearest.levelId;
-      } else if (nearestDist < 500) {
-        this._moveTowards(nearest.pos, dt, ctx);
-        if (nearestDist < this.radius + nearest.radius + 5) {
-          ctx.combat.dealDamage(nearest, 9999, this, 'touch_plague', ctx);
-          ctx.combat.scheduleZombie(nearest, this, ctx);
+    if (best) {
+      const dist = Vec2.dist(this.pos, best.pos);
+      if (best.levelId !== this.levelId) {
+        this.patrolZone = best.levelId;
+      } else if (dist < 450) {
+        this._moveTowardsPath(best.pos, dt, ctx);
+        if (dist < this.radius + best.radius + 5) {
+          ctx.combat.dealDamage(best, 9999, this, 'touch_plague', ctx);
+          ctx.combat.scheduleZombie(best, this, ctx);
+          this.attackAnimTimer = 0.5;
+          // 杀死后短暂停顿观察 (仪式感)
+          this.fireCooldown = 1.0;
         }
       } else {
         this._behaviorWander(dt, ctx);
@@ -593,23 +648,51 @@ class NPC {
     }
   }
 
+  // ============================================================
+  // SCP-939: 声音猎手伏击 (SCP:SL原设定)
+  // 潜行靠近声音源 → 静止等待 → 猎物接近时扑击
+  // ============================================================
   _behaviorAmbush(dt, ctx) {
+    // 附近可扑击猎物?
+    let prey = null;
+    let preyDist = Infinity;
+    for (const e of ctx.allEntities) {
+      if (e === this || e.dead || e.faction === 'SCP' || e.faction === 'WILD' || e.faction === 'ZOMBIE') continue;
+      const d = Vec2.dist(this.pos, e.pos);
+      if (d < 90 && d < preyDist) { preyDist = d; prey = e; }
+    }
+
+    // 有猎物在扑击范围: 扑击
+    if (prey) {
+      this.speed = 90;
+      this._moveTowards(prey.pos, dt, ctx);
+      if (preyDist < this.radius + prey.radius + 8) {
+        ctx.combat.dealDamage(prey, 120, this, 'pounce', ctx);
+        this.attackAnimTimer = 0.5;
+        this.fireCooldown = 1.5; // 扑击后短暂停顿
+      }
+      return;
+    }
+
+    // 听到声音: 潜行接近 (低速度, 减少暴露)
     if (this.lastHeardNoise) {
       const age = ctx.gameTime - this.lastHeardNoise.time;
-      if (age < 3.0) {
-        this._moveTowards(this.lastHeardNoise.pos, dt, ctx);
-        for (const e of ctx.allEntities) {
-          if (e === this || e.dead || e.faction === 'SCP' || e.faction === 'WILD' || e.faction === 'ZOMBIE') continue;
-          const d = Vec2.dist(this.pos, e.pos);
-          if (d < this.radius + e.radius + 10) {
-            ctx.combat.dealDamage(e, 120, this, 'pounce', ctx);
-            this.attackAnimTimer = 0.5;
-          }
+      if (age < 4.0) {
+        this.speed = 55; // 潜行速度
+        const distToNoise = Vec2.dist(this.pos, this.lastHeardNoise.pos);
+        if (distToNoise > 70) {
+          this._moveTowardsPath(this.lastHeardNoise.pos, dt, ctx);
+        } else {
+          // 已接近声音源: 静止埋伏等待
+          this.vel.x *= 0.85; this.vel.y *= 0.85;
         }
         return;
       }
     }
-    this.vel.x *= 0.9; this.vel.y *= 0.9;
+
+    // 无声音无猎物: 缓慢游荡
+    this.speed = 40;
+    this._behaviorWander(dt, ctx);
   }
 
   _behaviorZombie(dt, ctx) {

@@ -10,8 +10,22 @@
   <div id="app">
     <canvas id="gameCanvas"></canvas>
 
+    <!-- ===== 开始菜单 (主菜单) ===== -->
+    <div id="start-menu" class="overlay">
+      <div class="start-box">
+        <h1 class="start-title">SCP 收容失效</h1>
+        <p class="start-sub">CONTAINMENT BREACH — HTML Edition</p>
+        <p class="start-desc">多阵营 AI 仿真 · 四区域多地图 · 六角色可选</p>
+        <div class="start-buttons">
+          <button id="btn-start-play" class="menu-btn start-btn">开始游戏</button>
+          <button id="btn-start-observe" class="menu-btn">观察模式 (不选角色)</button>
+        </div>
+        <p class="menu-hint">v1.0.0 — 地表区 / 办公区 / 重收容区 / 轻收容区</p>
+      </div>
+    </div>
+
     <!-- ===== 角色选择菜单 ===== -->
-    <div id="role-menu" class="overlay">
+    <div id="role-menu" class="overlay hidden">
       <div class="menu-box">
         <h1>SCP 收容失效</h1>
         <p class="menu-sub">AI 多阵营仿真原型 v1.0.0 — 四区域多地图 · 选择一个角色进入设施</p>
@@ -150,8 +164,15 @@
         <div class="ammo-row">
           <span id="player-portal-hint" class="hidden"></span>
         </div>
-        <div id="player-inventory" class="hidden"></div>
         <div id="scp-watch-warning" class="watch-warning hidden">⚠ 被注视 — 冻结!</div>
+      </div>
+
+      <!-- 背包面板 (Tab 开关) -->
+      <div id="inventory-panel" class="hidden">
+        <div class="inv-title">背包 <span id="inv-count">0/6</span></div>
+        <div class="inv-hint">按 Tab 关闭 · 数字键 1-6 使用</div>
+        <div id="inv-grid"></div>
+        <div id="inv-detail" class="inv-detail hidden"></div>
       </div>
 
       <!-- 任务面板 (左上) -->
@@ -173,26 +194,29 @@
       </div>
 
       <div id="hud-controls">
-        <div class="ctrl-group">
-          <label>速度</label>
-          <button id="btn-pause">⏸</button>
-          <button id="btn-1x">1x</button>
-          <button id="btn-2x">2x</button>
-          <button id="btn-4x">4x</button>
-        </div>
-        <div class="ctrl-group">
-          <label>显示</label>
-          <button id="btn-vision" class="toggle-on">视野锥</button>
-          <button id="btn-hearing" class="toggle-on">听觉</button>
-          <button id="btn-paths" class="toggle-off">路径</button>
-          <button id="btn-labels" class="toggle-on">标签</button>
-        </div>
-        <div class="ctrl-group">
-          <label>操作</label>
-          <button id="btn-restart">主菜单</button>
-          <button id="btn-spawn-mtf">+MTF</button>
-          <button id="btn-spawn-ci">+CI</button>
-          <button id="btn-spawn-scp">+SCP</button>
+        <button id="btn-controls-toggle" title="显示/隐藏控制面板">⚙</button>
+        <div id="controls-body">
+          <div class="ctrl-group">
+            <label>速度</label>
+            <button id="btn-pause">⏸</button>
+            <button id="btn-1x">1x</button>
+            <button id="btn-2x">2x</button>
+            <button id="btn-4x">4x</button>
+          </div>
+          <div class="ctrl-group">
+            <label>显示</label>
+            <button id="btn-vision" class="toggle-on">视野</button>
+            <button id="btn-hearing" class="toggle-on">听觉</button>
+            <button id="btn-paths" class="toggle-off">路径</button>
+            <button id="btn-labels" class="toggle-on">标签</button>
+          </div>
+          <div class="ctrl-group">
+            <label>操作</label>
+            <button id="btn-restart">主菜单</button>
+            <button id="btn-spawn-mtf">+MTF</button>
+            <button id="btn-spawn-ci">+CI</button>
+            <button id="btn-spawn-scp">+SCP</button>
+          </div>
         </div>
       </div>
     </div>
